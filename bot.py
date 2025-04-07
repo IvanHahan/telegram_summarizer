@@ -11,8 +11,10 @@ Note:
 To use arbitrary callback data, you must install PTB via
 `pip install "python-telegram-bot[callback-data]"`
 """
+import asyncio
 import logging
 import os
+import uuid
 from typing import cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -25,6 +27,8 @@ from telegram.ext import (
     PicklePersistence,
 )
 
+from telegram_bot.agent import create_workflow
+
 # Enable logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -33,12 +37,19 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+config = {"configurable": {"thread_id": str(uuid.uuid4())}}
+workflow = create_workflow()
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a message with 5 inline buttons attached."""
-    number_list: list[int] = []
-    await update.message.reply_text("Please choose:", reply_markup=build_keyboard(number_list))
+async def what_i_missed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """what i missed request"""
+    def invoke_with_loop():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return workflow.invoke(dict(), config)
+    res = await asyncio.get_running_loop().run_in_executor(None, invoke_with_loop)
+    await update.message.reply_text(res['messages'][-1].content)
+
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -104,7 +115,7 @@ def main() -> None:
         .build()
     )
 
-    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("what_i_missed", what_i_missed))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("clear", clear))
     application.add_handler(
