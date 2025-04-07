@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from telethon.sync import TelegramClient
@@ -14,7 +15,8 @@ def get_unread_chats(client,
                      include_groups=False, 
                      include_channels=False, 
                      include_muted=False, 
-                     max_unread_count=None):
+                     max_unread_count=None,
+                     max_days=7):
     """
     Extract unread messages from private chats, group chats, and/or channels based on the provided flags.
     
@@ -31,11 +33,12 @@ def get_unread_chats(client,
     """
     unread_chats = []
     dialogs = client.get_dialogs()
+
     for dialog in dialogs:
         if dialog.unread_count > 0:  # Check if the chat has unread messages
             # Check if the chat is muted
             is_muted = dialog.dialog.notify_settings and dialog.dialog.notify_settings.mute_until
-            if not include_muted and is_muted and is_muted:
+            if not include_muted and is_muted:
                 continue
             
             if (include_private and dialog.is_user) or \
@@ -43,7 +46,10 @@ def get_unread_chats(client,
                (include_channels and dialog.is_channel):
                 # Fetch unread messages
                 unread_messages = []
-                for message in client.iter_messages(dialog.id, limit=max_unread_count):
+                for message in client.iter_messages(dialog.id, limit=dialog.unread_count):
+                    if (datetime.now(timezone.utc) - message.date).days > max_days:  # Skip messages older than a week
+                        continue
+                    
                     sender_name = None
                     if message.sender:
                         sender_name = message.sender.first_name or message.sender.last_name or message.sender.username
@@ -52,12 +58,12 @@ def get_unread_chats(client,
                         "sender_id": message.sender_id,
                         "sender_name": sender_name
                     })
-                
-                unread_chats.append({
-                    "chat_name": dialog.name,
-                    "unread_count": dialog.unread_count,
-                    "unread_messages": unread_messages
-                })
+                if unread_messages:
+                    unread_chats.append({
+                        "chat_name": dialog.name,
+                        "unread_count": dialog.unread_count,
+                        "unread_messages": unread_messages
+                    })
     return unread_chats
 
 def create_telegram_client(session_name="session_name", api_id=api_id, api_hash=api_hash):
@@ -76,34 +82,35 @@ def create_telegram_client(session_name="session_name", api_id=api_id, api_hash=
     client = TelegramClient(session_name, api_id, api_hash)
     return client
 
-# Example usage
-with create_telegram_client() as client:
-    print("Telegram client created successfully!")
+if __name__ == "__main__":
+    # Example usage
+    with create_telegram_client() as client:
+        print("Telegram client created successfully!")
 
-    # Extract only private chats, excluding muted ones, with a maximum of 5 unread messages per chat
-    unread_private_chats = get_unread_chats(client, include_private=True, include_groups=False, include_channels=False, include_muted=False, max_unread_count=5)
-    print("Unread private chats (excluding muted, max 5 messages):")
-    for chat in unread_private_chats:
-        print(f"Private Chat: {chat['chat_name']}, Unread messages: {chat['unread_count']}")
-        for message in chat['unread_messages']:
-            print(f"  - {message}")
+        # Extract only private chats, excluding muted ones, with a maximum of 5 unread messages per chat
+        unread_private_chats = get_unread_chats(client, include_private=True, include_groups=False, include_channels=False, include_muted=False, max_unread_count=5)
+        print("Unread private chats (excluding muted, max 5 messages):")
+        for chat in unread_private_chats:
+            print(f"Private Chat: {chat['chat_name']}, Unread messages: {chat['unread_count']}")
+            for message in chat['unread_messages']:
+                print(f"  - {message}")
 
-    # Extract only group chats
-    unread_group_chats = get_unread_chats(client, include_private=False, include_groups=True, include_channels=False)
-    print("\nUnread group chats:")
-    for chat in unread_group_chats:
-        print(f"Group Chat: {chat['chat_name']}, Unread messages: {chat['unread_count']}")
+        # Extract only group chats
+        unread_group_chats = get_unread_chats(client, include_private=False, include_groups=True, include_channels=False)
+        print("\nUnread group chats:")
+        for chat in unread_group_chats:
+            print(f"Group Chat: {chat['chat_name']}, Unread messages: {chat['unread_count']}")
 
-    # Extract only channels
-    unread_channel_chats = get_unread_chats(client, include_private=False, include_groups=False, include_channels=True)
-    print("\nUnread channels:")
-    for chat in unread_channel_chats:
-        print(f"Channel: {chat['chat_name']}, Unread messages: {chat['unread_count']}")
+        # Extract only channels
+        unread_channel_chats = get_unread_chats(client, include_private=False, include_groups=False, include_channels=True)
+        print("\nUnread channels:")
+        for chat in unread_channel_chats:
+            print(f"Channel: {chat['chat_name']}, Unread messages: {chat['unread_count']}")
 
-    # Extract all types of chats, including muted ones
-    unread_all_chats = get_unread_chats(client, include_private=True, include_groups=True, include_channels=True, include_muted=True)
-    print("\nUnread private chats, group chats, and channels (including muted):")
-    for chat in unread_all_chats:
-        print(f"Chat: {chat['chat_name']}, Unread messages: {chat['unread_count']}")
-        for message in chat['unread_messages']:
-            print(f"  - {message}")
+        # Extract all types of chats, including muted ones
+        unread_all_chats = get_unread_chats(client, include_private=True, include_groups=True, include_channels=True, include_muted=True)
+        print("\nUnread private chats, group chats, and channels (including muted):")
+        for chat in unread_all_chats:
+            print(f"Chat: {chat['chat_name']}, Unread messages: {chat['unread_count']}")
+            for message in chat['unread_messages']:
+                print(f"  - {message}")
