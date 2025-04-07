@@ -10,7 +10,7 @@ api_id = os.getenv("TELEGRAM_API_ID")
 api_hash = os.getenv("TELEGRAM_API_HASH")
 phone_number = os.getenv("PHONE_NUMBER")
 
-def get_unread_chats(client, 
+async def get_unread_chats(client, 
                      include_private=True, 
                      include_groups=False, 
                      include_channels=False, 
@@ -32,7 +32,7 @@ def get_unread_chats(client,
         list: A list of dictionaries containing chat names, unread message counts, and unread messages.
     """
     unread_chats = []
-    dialogs = client.get_dialogs()
+    dialogs = await client.get_dialogs()
 
     for dialog in dialogs:
         if dialog.unread_count > 0:  # Check if the chat has unread messages
@@ -46,7 +46,7 @@ def get_unread_chats(client,
                (include_channels and dialog.is_channel):
                 # Fetch unread messages
                 unread_messages = []
-                for message in client.iter_messages(dialog.id, limit=dialog.unread_count):
+                async for message in client.iter_messages(dialog.id, limit=dialog.unread_count):
                     if (datetime.now(timezone.utc) - message.date).days > max_days:  # Skip messages older than a week
                         continue
                     

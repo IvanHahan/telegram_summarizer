@@ -63,12 +63,12 @@ class State(TypedDict):
 
 
 # --- Workflow Nodes ---
-def unread_messages_node(state):
+async def unread_messages_node(state):
     """
     Extract unread messages from Telegram chats.
     """
-    with create_telegram_client() as client:
-        unread_chats = get_unread_chats(client)
+    async with create_telegram_client() as client:
+        unread_chats = await get_unread_chats(client, include_groups=True)
     return {"unread_chats": unread_chats}
 
 
@@ -80,7 +80,7 @@ def summarize_node(state):
     llm = create_llm()
     chain = summarize_prompt | llm
     response = chain.invoke(input={"messages": state["unread_chats"]})
-    return {"messages": [response]}
+    return {"unread_messages_summary": response.content}
 
 
 # --- Workflow Setup ---

@@ -11,7 +11,6 @@ Note:
 To use arbitrary callback data, you must install PTB via
 `pip install "python-telegram-bot[callback-data]"`
 """
-import asyncio
 import logging
 import os
 import uuid
@@ -43,12 +42,10 @@ workflow = create_workflow()
 
 async def what_i_missed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """what i missed request"""
-    def invoke_with_loop():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        return workflow.invoke(dict(), config)
-    res = await asyncio.get_running_loop().run_in_executor(None, invoke_with_loop)
-    await update.message.reply_text(res['messages'][-1].content)
+    res = await workflow.ainvoke(
+        dict(), config=config
+    )
+    await update.message.reply_text(res['unread_messages_summary'])
 
 
 
