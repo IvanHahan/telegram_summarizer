@@ -68,7 +68,7 @@ def unread_messages_node(state):
     Extract unread messages from Telegram chats.
     """
     with create_telegram_client() as client:
-        unread_chats = get_unread_chats(client, max_unread_count=5)
+        unread_chats = get_unread_chats(client)
     return {"unread_chats": unread_chats}
 
 
