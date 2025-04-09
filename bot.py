@@ -14,7 +14,6 @@ To use arbitrary callback data, you must install PTB via
 import logging
 import os
 import uuid
-from typing import cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -23,7 +22,9 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     InvalidCallbackData,
+    MessageHandler,
     PicklePersistence,
+    filters,
 )
 
 from telegram_bot.agent import create_workflow
@@ -43,10 +44,23 @@ workflow = create_workflow()
 async def what_i_missed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """what i missed request"""
     res = await workflow.ainvoke(
-        dict(), config=config
+        {'action': 'unread_summary'}, config=config
     )
-    await update.message.reply_text(res['unread_messages_summary'])
+    await update.message.reply_text(res['messages'][-1].content)
 
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles the /start command."""
+    keyboard = [
+        [InlineKeyboardButton("What I Missed", callback_data="what_i_missed")],
+        [InlineKeyboardButton("Help", callback_data="help")],
+        [InlineKeyboardButton("Clear", callback_data="clear")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "Welcome to the Telegram Summarizer Bot! Use the buttons below to get started:",
+        reply_markup=reply_markup
+    )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -64,33 +78,6 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text("All clear!")
 
 
-def build_keyboard(current_list: list[int]) -> InlineKeyboardMarkup:
-    """Helper function to build the next inline keyboard."""
-    return InlineKeyboardMarkup.from_column(
-        [InlineKeyboardButton(str(i), callback_data=(i, current_list)) for i in range(1, 6)]
-    )
-
-
-async def list_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Parses the CallbackQuery and updates the message text."""
-    query = update.callback_query
-    await query.answer()
-    # Get the data from the callback_data.
-    # If you're using a type checker like MyPy, you'll have to use typing.cast
-    # to make the checker get the expected type of the callback_data
-    number, number_list = cast(tuple[int, list[int]], query.data)
-    # append the number to the list
-    number_list.append(number)
-
-    await query.edit_message_text(
-        text=f"So far you've selected {number_list}. Choose the next item:",
-        reply_markup=build_keyboard(number_list),
-    )
-
-    # we can delete the data stored for the query, because we've replaced the buttons
-    context.drop_callback_data(query)
-
-
 async def handle_invalid_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Informs the user that the button is no longer available."""
     await update.callback_query.answer()
@@ -99,11 +86,19 @@ async def handle_invalid_button(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
+async def handle_freeform_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles freeform text messages."""
+    res = await workflow.ainvoke(
+        {'action': 'message', 'messages': [update.message.text]}, config=config
+    )
+    await update.message.reply_text(
+        res['messages'][-1].content
+    )
+
+
 def main() -> None:
     """Run the bot."""
-    # We use persistence to demonstrate how buttons can still work after the bot was restarted
     persistence = PicklePersistence(filepath="arbitrarycallbackdatabot")
-    # Create the Application and pass it your bot's token.
     application = (
         Application.builder()
         .token(os.getenv("TELEGRAM_TOKEN"))
@@ -113,12 +108,13 @@ def main() -> None:
     )
 
     application.add_handler(CommandHandler("what_i_missed", what_i_missed))
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("clear", clear))
     application.add_handler(
         CallbackQueryHandler(handle_invalid_button, pattern=InvalidCallbackData)
     )
-    application.add_handler(CallbackQueryHandler(list_button))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_freeform_message))  # Freeform handler
 
     # Run the bot until the user presses Ctrl-C
     application.run_polling(allowed_updates=Update.ALL_TYPES)
