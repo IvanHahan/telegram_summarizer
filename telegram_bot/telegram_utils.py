@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 
 from dotenv import load_dotenv
 from telethon.sync import TelegramClient
@@ -84,6 +85,52 @@ async def mark_chats_as_read(client, chat_ids):
     """
     for chat_id in chat_ids:
         await client.send_read_acknowledge(chat_id)
+
+async def search_chat(client, query, top_k=3):
+    """
+    Search for a chat by name or ID. If the query is a string, find the top-k similar dialogs.
+
+    Args:
+        client (TelegramClient): An instance of the TelegramClient.
+        query (str or int): The name or ID of the chat to search for.
+        top_k (int): The number of top similar chats to return if the query is a string.
+
+    Returns:
+        list: A list of dictionaries containing chat details for the top-k matches, or a single match if the query is an ID.
+    """
+    dialogs = await client.get_dialogs()
+    results = []
+
+    if isinstance(query, str):
+        # Calculate similarity for each dialog name
+        for dialog in dialogs:
+            similarity = SequenceMatcher(None, query.lower(), dialog.name.lower()).ratio()
+            results.append({
+                "chat_name": dialog.name,
+                "chat_id": dialog.id,
+                "is_channel": dialog.is_channel,
+                "is_group": dialog.is_group,
+                "unread_count": dialog.unread_count,
+                "similarity": similarity,
+            })
+
+        # Sort results by similarity in descending order and return the top-k
+        results = sorted(results, key=lambda x: x["similarity"], reverse=True)[:top_k]
+        return results
+
+    elif isinstance(query, int):
+        # Match by chat ID
+        for dialog in dialogs:
+            if dialog.id == query:
+                return [{
+                    "chat_name": dialog.name,
+                    "chat_id": dialog.id,
+                    "is_channel": dialog.is_channel,
+                    "is_group": dialog.is_group,
+                    "unread_count": dialog.unread_count,
+                }]
+
+    return []  # Return an empty list if no match is found
 
 def create_telegram_client(session_name="session_name", api_id=api_id, api_hash=api_hash):
     """
