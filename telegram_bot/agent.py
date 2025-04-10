@@ -203,7 +203,7 @@ def create_workflow():
     workflow.add_edge("unread_messages_node", "summarize_node")
     workflow.add_edge("summarize_node", END)
 
-    return workflow.compile(checkpointer=memory)
+    return workflow.compile()
 
 
 # --- Main Execution ---
