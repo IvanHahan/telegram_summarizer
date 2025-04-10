@@ -132,6 +132,25 @@ async def search_chat(client, query, top_k=3):
 
     return []  # Return an empty list if no match is found
 
+async def send_message(client, chat_id, message):
+    """
+    Send a message to a specific chat.
+
+    Args:
+        client (TelegramClient): An instance of the TelegramClient.
+        chat_id (int or str): The ID or username of the chat to send the message to.
+        message (str): The message text to send.
+
+    Returns:
+        Message: The sent message object.
+    """
+    try:
+        sent_message = await client.send_message(chat_id, message)
+        return sent_message
+    except Exception as e:
+        print(f"Failed to send message to chat {chat_id}: {e}")
+        return None
+
 def create_telegram_client(session_name="session_name", api_id=api_id, api_hash=api_hash):
     """
     Create and return a Telegram client instance.
