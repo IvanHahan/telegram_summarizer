@@ -106,6 +106,7 @@ class State(TypedDict):
     action: Literal["message", "unread_summary"]
     messages: Annotated[list, add_messages]
     unread_chats: list
+    
 
 
 def route_user_request(state):
@@ -127,10 +128,11 @@ def route_llm_request(state):
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         if last_message.tool_calls[0]['name'] == "get_unread_chats_tool":
-            return "unread_messages_node"
-        return END
-    else:
-        return END
+            if 'unread_chats' in state and state['unread_chats']:
+                return 'summarize_node'
+            else:
+                return "unread_messages_node"
+    return END
 
 
 # --- Workflow Nodes ---
@@ -197,7 +199,7 @@ def create_workflow():
     workflow.add_conditional_edges(
         "chat_node",
         route_llm_request,
-        ["unread_messages_node", END],
+        ["unread_messages_node", "summarize_node", END],
     )
 
     workflow.add_edge("unread_messages_node", "summarize_node")

@@ -11,10 +11,12 @@ Note:
 To use arbitrary callback data, you must install PTB via
 `pip install "python-telegram-bot[callback-data]"`
 """
+import json
 import logging
 import os
 import uuid
 
+import redis
 from langchain_core.messages import AIMessage, HumanMessage
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -42,6 +44,33 @@ logger = logging.getLogger(__name__)
 config = {"configurable": {"thread_id": str(uuid.uuid4())}}
 workflow = create_workflow()
 
+# Initialize Redis client
+redis_client = redis.StrictRedis(host="localhost", port=6379, db=0, decode_responses=True)
+
+async def save_user_state(user_id: int, state: dict) -> None:
+    """Save user state to Redis."""
+    state['messages'] = [msg.to_json() for msg in state['messages']]
+    redis_client.set(f"user:{user_id}:state", json.dumps(state))
+
+def message_decoder(data):
+    if isinstance(data, dict) and "id" in data and "kwargs" in data:
+        class_id = data["id"]
+        kwargs = data["kwargs"]
+        if class_id[-1] == "HumanMessage":
+            return HumanMessage(**kwargs)
+        elif class_id[-1] == "AIMessage":
+            return AIMessage(**kwargs)
+    return data
+
+async def get_user_state(user_id: int) -> dict:
+    """Retrieve user state from Redis."""
+    state = redis_client.get(f"user:{user_id}:state")
+    state = json.loads(state) if state else {}
+    if state.get('messages'):
+        state['messages'] = [message_decoder(msg) for msg in state['messages']] 
+    return state
+
+
 async def create_mark_as_read_handler(update: Update):
     keyboard = [
             [
@@ -58,14 +87,15 @@ async def create_mark_as_read_handler(update: Update):
 
 async def what_i_missed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the 'What I Missed' request."""
-    state = context.user_data.get('state', {})
+    user_id = update.effective_user.id
+    state = await get_user_state(user_id)  # Retrieve state from Redis
     state['action'] = 'unread_summary'
     
     # Invoke the workflow and save the result
     res = await workflow.ainvoke(state, config=config)
     state['messages'] = res['messages']
     state['unread_chats'] = res.get('unread_chats', [])
-    context.user_data['state'] = state  # Save state for the user
+    await save_user_state(user_id, state)  # Save updated state to Redis
 
     # Send the response to the user
     await update.message.reply_text(res['messages'][-1].content)
@@ -115,7 +145,8 @@ async def handle_invalid_button(update: Update, context: ContextTypes.DEFAULT_TY
 async def handle_freeform_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles freeform text messages."""
 
-    state = context.user_data.get('state', {})
+    user_id = update.effective_user.id
+    state = await get_user_state(user_id)  # Retrieve state from Redis
     state['action'] = 'message'
     if not state.get('messages'):
         state['messages'] = []
@@ -128,21 +159,20 @@ async def handle_freeform_message(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text(
         res['messages'][-1].content
     )
-
+    await save_user_state(user_id, state)  # Save updated state to Redis
+    
     if 'unread_chats' in res and len(res['unread_chats']) > 0:
         state['messages'].append(AIMessage("Would you like to mark them as read?"))
         await create_mark_as_read_handler(update)
+    
+
 
 
 async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the 'Mark as Read' button."""
-    await update.callback_query.answer()  # Acknowledge the callback query
-
-    # Retrieve the state from user_data
-    state = context.user_data.get('state', {})
+    user_id = update.effective_user.id
+    state = await get_user_state(user_id)  # Retrieve state from Redis
     unread_chats = state.get('unread_chats', [])
-
-    state['messages'].append(HumanMessage("Yes"))
 
     # Mark chats as read
     async with create_telegram_client() as client:
@@ -150,8 +180,8 @@ async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await mark_chats_as_read(client, chat_ids)
 
     state['unread_chats'] = []  # Clear unread chats after marking as read
-    # Update the state and notify the user
     state['messages'].append(AIMessage("Done! All unread messages have been marked as read."))
+    await save_user_state(user_id, state)  # Save updated state to Redis
     await update.effective_message.edit_text(state['messages'][-1].content)
 
 
