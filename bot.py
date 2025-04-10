@@ -30,8 +30,8 @@ from telegram.ext import (
     filters,
 )
 
-from telegram_bot.agent import create_workflow
 from telegram_bot.telegram_utils import create_telegram_client, mark_chats_as_read
+from telegram_bot.workflow import create_workflow
 
 # Enable logging
 logging.basicConfig(

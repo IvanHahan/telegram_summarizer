@@ -86,9 +86,34 @@ async def mark_chats_as_read(client, chat_ids):
     for chat_id in chat_ids:
         await client.send_read_acknowledge(chat_id)
 
+def bigram_similarity(query: str, target: str) -> float:
+    """
+    Calculate the similarity between two strings using bigrams and intersection.
+
+    Args:
+        query (str): The query string.
+        target (str): The target string to compare against.
+
+    Returns:
+        float: A similarity score between 0 and 1.
+    """
+    def get_bigrams(text: str) -> set:
+        """Generate a set of bigrams from a string."""
+        text = text.lower()
+        return {text[i:i+2] for i in range(len(text) - 1)}
+
+    query_bigrams = get_bigrams(query)
+    target_bigrams = get_bigrams(target)
+
+    intersection = query_bigrams & target_bigrams
+    union = query_bigrams | target_bigrams
+
+    return len(intersection) / len(query_bigrams) if union else 0.0
+
+
 async def search_chat(client, query, top_k=3):
     """
-    Search for a chat by name or ID. If the query is a string, find the top-k similar dialogs.
+    Search for a chat by name or ID. If the query is a string, find the top-k similar dialogs using bigram similarity.
 
     Args:
         client (TelegramClient): An instance of the TelegramClient.
@@ -102,7 +127,7 @@ async def search_chat(client, query, top_k=3):
     results = []
 
     if isinstance(query, str):
-        # Calculate similarity for each dialog name
+        # Calculate bigram similarity for each dialog name
         for dialog in dialogs:
             similarity = SequenceMatcher(None, query.lower(), dialog.name.lower()).ratio()
             results.append({
