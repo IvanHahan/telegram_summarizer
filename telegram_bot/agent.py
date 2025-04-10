@@ -20,17 +20,17 @@ SYSTEM_MESSAGE = """
 """
 
 SUMMARIZE_PROMPT_TEMPLATE = """
-    Summarize given chats. Use the following format:
+    Summarize messages in given chats in several sentences for every chat. Use the following format:
     
-    Chats (Optional):
+    Chats:
     <Chat name 1>: <summary_for_chat>
     <Chat name 2>: <summary_for_chat>
 
-    Channels (Optional):
+    Channels:
     <Channel_name_1>: summary_for_channel
     <Channel_name_2>: summary_for_channel
 
-    Groups (Optional):
+    Groups:
     <Group_name_1>: summary_for_group
     <Group_name_2>: summary_for_group
 
