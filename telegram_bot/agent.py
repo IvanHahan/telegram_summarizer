@@ -106,7 +106,6 @@ class State(TypedDict):
     action: Literal["message", "unread_summary"]
     messages: Annotated[list, add_messages]
     unread_chats: list
-    limit_context_error: bool
 
 
 def route_user_request(state):
@@ -154,6 +153,7 @@ def summarize_node(state):
     Summarize unread messages using the LLM.
     """
     def func():
+        global limit_context_error
         unread_chats = state['unread_chats']
         if state['messages']:
             state['messages'][-1] = AIMessage(format_chats(unread_chats))
@@ -169,11 +169,12 @@ def summarize_node(state):
                         chat['unread_messages'] = chat['unread_messages'][:len(chat['unread_messages'])//2]
                 state['unread_chats'] = state['unread_chats'][:len(state['unread_chats'])//2]
                 response = func()
-                state['limit_context_error'] = True
+                limit_context_error = True
                 return response
-        
+    
+    limit_context_error = False
     response = func()
-    if state['limit_context_error']:
+    if limit_context_error:
         state['messages'][-1] = AIMessage(f"Context length exceeded. Here is a partial summary:\n{response.content}")
     state['messages'] += [response]
     return state
