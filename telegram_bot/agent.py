@@ -11,17 +11,29 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import Literal, TypedDict
 
-from telegram_bot.telegram import create_telegram_client, get_unread_chats
+from telegram_bot.telegram_utils import create_telegram_client, get_unread_chats
 
 # --- Constants ---
 SYSTEM_MESSAGE = """
     You are a messenger assistant. Your task is to analyze messages and provide some insights about them.
+    You must answer in Ukrainian language.
 """
 
 SUMMARIZE_PROMPT_TEMPLATE = """
-    You are a chat summarization assistant. Your task is to summarize the following unread chats or messages:
-    {messages}
-    Please provide a concise summary of the messages per chat if provided, highlighting the main points and any important details including authors. You must answer in Ukranian language.
+    Summarize given chats. Use the following format:
+    
+    Chats (Optional):
+    <Chat name 1>: <summary_for_chat>
+    <Chat name 2>: <summary_for_chat>
+
+    Channels (Optional):
+    <Channel_name_1>: summary_for_channel
+    <Channel_name_2>: summary_for_channel
+
+    Groups (Optional):
+    <Group_name_1>: summary_for_group
+    <Group_name_2>: summary_for_group
+
 """
 
 
@@ -42,12 +54,28 @@ def create_llm():
     )
 
 @tool
-async def get_unread_chats_tool() -> list:
+async def get_unread_chats_tool(include_groups=True, include_private=True, include_channels=True, include_muted=False) -> list:
     """
-    Fetch unread chats from Telegram, including groups. Call only if the user requests it.
+    Fetch unread chats from Telegram, including groups, private chats, and channels. 
+    Call this tool only if the user requests it.
+
+    Args:
+        include_groups (bool): If True, include group chats in the results.
+        include_private (bool): If True, include private chats in the results.
+        include_channels (bool): If True, include channels, news channels in the results.
+        include_muted (bool): If True, include muted chats in the results. 
+                              Muted chats are those for which notifications are disabled.
+    Returns:
+        list: A list of unread chats with their details, filtered based on the provided arguments.
     """
     async with create_telegram_client() as client:
-        unread_chats = await get_unread_chats(client, include_groups=True)
+        unread_chats = await get_unread_chats(
+            client,
+            include_groups=include_groups,
+            include_private=include_private,
+            include_channels=include_channels,
+            include_muted=include_muted
+        )
     return unread_chats
 
 llm = create_llm()
@@ -63,16 +91,22 @@ def format_chats(chats):
         chat_name = chat["chat_name"]
         unread_messages = chat["unread_messages"]
         formatted_messages = [
-            f"{msg['sender_name']}: {msg['text']}" for msg in unread_messages
+            f"{msg['sender_name']}: {msg['text']}" if 'sender_name' in msg else msg['text'] for msg in unread_messages
         ]
-        formatted_chats.append(f"Chat: {chat_name}\n" + "\n".join(formatted_messages))
+        title = 'Chat'
+        if chat["is_channel"]:
+            title = 'Channel'
+        elif chat["is_group"]:
+            title = 'Group'
+        formatted_chats.append(f"{title}: {chat_name}\n" + "\n".join(formatted_messages))
     return "\n\n".join(formatted_chats)
-
 
 # --- State Definition ---
 class State(TypedDict):
     action: Literal["message", "unread_summary"]
     messages: Annotated[list, add_messages]
+    unread_chats: list
+    limit_context_error: bool
 
 
 def route_user_request(state):
@@ -105,8 +139,13 @@ async def unread_messages_node(state):
     """
     Extract unread messages from Telegram chats.
     """
-    unread_chats = await get_unread_chats_tool.ainvoke({})
-    state['messages'][-1] = AIMessage(format_chats(unread_chats))
+    last_message = state["messages"][-1]
+    kwargs = {}
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        kwargs = last_message.tool_calls[0]['args']
+    unread_chats = await get_unread_chats_tool.ainvoke(kwargs)
+
+    state['unread_chats'] = unread_chats
     return state
 
 
@@ -114,9 +153,28 @@ def summarize_node(state):
     """
     Summarize unread messages using the LLM.
     """
-    summarize_prompt = f"provide a summary for the given chats in Ukrainian language"
-    messages = [SystemMessage(SYSTEM_MESSAGE)] + state['messages'] + [HumanMessage(summarize_prompt)]
-    response = llm.invoke(input=messages)
+    def func():
+        unread_chats = state['unread_chats']
+        if state['messages']:
+            state['messages'][-1] = AIMessage(format_chats(unread_chats))
+        else:
+            state['messages'] = [AIMessage(format_chats(unread_chats))]
+        messages = [SystemMessage(SYSTEM_MESSAGE)] + state['messages'] + [HumanMessage(SUMMARIZE_PROMPT_TEMPLATE)]
+        try:
+            return llm.invoke(input=messages)
+        except Exception as e:
+            if e.code == 'context_length_exceeded':
+                if len(state['unread_chats']) < 10:
+                    for chat in state['unread_chats']:
+                        chat['unread_messages'] = chat['unread_messages'][:len(chat['unread_messages'])//2]
+                state['unread_chats'] = state['unread_chats'][:len(state['unread_chats'])//2]
+                response = func()
+                state['limit_context_error'] = True
+                return response
+        
+    response = func()
+    if state['limit_context_error']:
+        state['messages'][-1] = AIMessage(f"Context length exceeded. Here is a partial summary:\n{response.content}")
     state['messages'] += [response]
     return state
 

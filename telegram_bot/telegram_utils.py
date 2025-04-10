@@ -15,8 +15,8 @@ async def get_unread_chats(client,
                      include_groups=False, 
                      include_channels=False, 
                      include_muted=False, 
-                     max_unread_count=None,
-                     max_days=7):
+                     max_unread_count=100,
+                     max_days=3):
     """
     Extract unread messages from private chats, group chats, and/or channels based on the provided flags.
     
@@ -46,25 +46,44 @@ async def get_unread_chats(client,
                (include_channels and dialog.is_channel):
                 # Fetch unread messages
                 unread_messages = []
-                async for message in client.iter_messages(dialog.id, limit=dialog.unread_count):
+                limit_messages = min(max_unread_count, dialog.unread_count)
+                async for message in client.iter_messages(dialog.id, limit=limit_messages):
                     if (datetime.now(timezone.utc) - message.date).days > max_days:  # Skip messages older than a week
                         continue
                     
                     sender_name = None
-                    if message.sender:
+                    if message.sender and hasattr(message.sender, 'first_name'):
                         sender_name = message.sender.first_name or message.sender.last_name or message.sender.username
                     unread_messages.append({
                         "text": message.text,
                         "sender_id": message.sender_id,
-                        "sender_name": sender_name
                     })
+                    if sender_name:
+                        unread_messages[-1]["sender_name"] = sender_name
                 if unread_messages:
                     unread_chats.append({
                         "chat_name": dialog.name,
+                        "chat_id": dialog.id,
                         "unread_count": dialog.unread_count,
-                        "unread_messages": unread_messages
+                        "unread_messages": unread_messages,
+                        "is_channel": dialog.is_channel,
+                        "is_group": dialog.is_group,
                     })
     return unread_chats
+
+async def mark_chats_as_read(client, chat_ids):
+    """
+    Mark the given chats as read.
+
+    Args:
+        client (TelegramClient): An instance of the TelegramClient.
+        chat_ids (list): A list of chat IDs to mark as read.
+
+    Returns:
+        None
+    """
+    for chat_id in chat_ids:
+        await client.send_read_acknowledge(chat_id)
 
 def create_telegram_client(session_name="session_name", api_id=api_id, api_hash=api_hash):
     """

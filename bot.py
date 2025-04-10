@@ -28,6 +28,7 @@ from telegram.ext import (
 )
 
 from telegram_bot.agent import create_workflow
+from telegram_bot.telegram_utils import create_telegram_client, mark_chats_as_read
 
 # Enable logging
 logging.basicConfig(
@@ -41,12 +42,31 @@ config = {"configurable": {"thread_id": str(uuid.uuid4())}}
 workflow = create_workflow()
 
 
+async def create_mark_as_read_handler(update: Update):
+    keyboard = [
+            [
+                InlineKeyboardButton("Mark as Read", callback_data="mark_as_read"),
+                InlineKeyboardButton("Cancel", callback_data="no_action")
+            ]
+        ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "Would you like to mark unread as read?",
+        reply_markup=reply_markup
+    )
+
+
 async def what_i_missed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """what i missed request"""
     res = await workflow.ainvoke(
         {'action': 'unread_summary'}, config=config
     )
+
     await update.message.reply_text(res['messages'][-1].content)
+
+    if res['unread_chats']:
+        context.user_data['unread_chats'] = res['unread_chats']
+        await create_mark_as_read_handler(update)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -95,6 +115,32 @@ async def handle_freeform_message(update: Update, context: ContextTypes.DEFAULT_
         res['messages'][-1].content
     )
 
+    if res['unread_chats']:
+        context.user_data['unread_chats'] = res['unread_chats']
+        await create_mark_as_read_handler(update)
+
+
+async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles the 'Mark as Read' button."""
+    await update.callback_query.answer()  # Acknowledge the callback query
+
+    # Retrieve res from user_data
+    res = context.user_data.get('unread_chats')
+
+    async with create_telegram_client() as client:
+        chat_ids = [chat['chat_id'] for chat in res]
+        await mark_chats_as_read(client, chat_ids)
+
+    await update.effective_message.edit_text(
+        "Done! All unread messages have been marked as read."
+    )
+
+
+async def no_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles the 'Cancel' button."""
+    await update.callback_query.answer()  # Acknowledge the callback query
+
+
 
 def main() -> None:
     """Run the bot."""
@@ -114,6 +160,9 @@ def main() -> None:
     application.add_handler(
         CallbackQueryHandler(handle_invalid_button, pattern=InvalidCallbackData)
     )
+    application.add_handler(
+        CallbackQueryHandler(mark_as_read, pattern="mark_as_read")
+    )  # Add the new handler here
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_freeform_message))  # Freeform handler
 
     # Run the bot until the user presses Ctrl-C
