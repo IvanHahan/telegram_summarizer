@@ -2,7 +2,6 @@ from langchain.prompts import PromptTemplate
 from langchain.tools import tool
 
 from telegram_bot.telegram_utils import (
-    create_telegram_client,
     get_unread_chats,
     mark_chats_as_read,
     search_chat,
@@ -14,7 +13,7 @@ from .utils import format_chats, llm
 
 
 @tool
-async def get_unread_chats_tool(include_groups=True, include_private=True, include_channels=True, include_muted=False) -> list:
+async def get_unread_chats_tool(client, include_groups=True, include_private=True, include_channels=True, include_muted=False) -> list:
     """
     Fetch unread chats from Telegram, including groups, private chats, and channels. 
     Call this tool only if the user requests it.
@@ -29,19 +28,18 @@ async def get_unread_chats_tool(include_groups=True, include_private=True, inclu
     Returns:
         list: A list of unread chats with their details, filtered based on the provided arguments.
     """
-    async with create_telegram_client() as client:
-        unread_chats = await get_unread_chats(
-            client,
-            include_groups=include_groups,
-            include_private=include_private,
-            include_channels=include_channels,
-            include_muted=include_muted
-        )
+    unread_chats = await get_unread_chats(
+        client,
+        include_groups=include_groups,
+        include_private=include_private,
+        include_channels=include_channels,
+        include_muted=include_muted
+    )
     return unread_chats
 
 
 @tool
-async def search_chat_tool(query: str, top_k: int = 5):
+async def search_chat_tool(client, query: str, top_k: int = 5):
     """
     Use when you need to retrieve chat ID.
     If it returns a list of chats, User must select the one.
@@ -50,13 +48,12 @@ async def search_chat_tool(query: str, top_k: int = 5):
         query (str or int): The name or ID of the chat to search for.
         top_k (int): The number of top similar chats to return if the query is a string.
     """
-    async with create_telegram_client() as client:
-        results = await search_chat(client, query, top_k=top_k)
+    results = await search_chat(client, query, top_k=top_k)
     return results
 
 
 @tool
-async def send_message_tool(chat_id: int, message: str) -> str:
+async def send_message_tool(client, chat_id: int, message: str) -> str:
     """
     Use to send a message to a specific chat by its ID.
     Use search_chat_tool to find the chat ID before using this tool if not found.
@@ -68,8 +65,7 @@ async def send_message_tool(chat_id: int, message: str) -> str:
     Returns:
         str: A confirmation message indicating the result of the operation.
     """
-    async with create_telegram_client() as client:
-        await send_message(client, chat_id, message)
+    await send_message(client, chat_id, message)
     return f"Message sent to chat ID {chat_id}."
 
 
@@ -164,7 +160,7 @@ async def try_send_message_tool(query: str, message: str) -> str:
     
 
 @tool
-async def mark_chats_as_read_tool(chat_ids: list) -> str:
+async def mark_chats_as_read_tool(client, chat_ids: list) -> str:
     """
     Mark the specified chats as read.
 
@@ -174,6 +170,5 @@ async def mark_chats_as_read_tool(chat_ids: list) -> str:
     Returns:
         str: A confirmation message indicating the result of the operation.
     """
-    async with create_telegram_client() as client:
-        await mark_chats_as_read(client, chat_ids)
+    await mark_chats_as_read(client, chat_ids)
     return f"Marked {len(chat_ids)} chats as read."

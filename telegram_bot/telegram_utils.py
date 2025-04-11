@@ -9,7 +9,6 @@ load_dotenv()
 
 api_id = os.getenv("TELEGRAM_API_ID")
 api_hash = os.getenv("TELEGRAM_API_HASH")
-phone_number = os.getenv("PHONE_NUMBER")
 
 async def get_unread_chats(client, 
                      include_private=True, 

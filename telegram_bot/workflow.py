@@ -10,6 +10,7 @@ from langgraph.graph.message import add_messages
 from typing_extensions import Literal, TypedDict
 
 from .prompts import SUMMARIZE_PROMPT_TEMPLATE, SYSTEM_MESSAGE
+from .telegram_utils import create_telegram_client
 from .tools import (
     get_unread_chats_tool,
     mark_chats_as_read_tool,
@@ -18,17 +19,14 @@ from .tools import (
 )
 from .utils import llm
 
-llm_with_tools = llm.bind_tools([get_unread_chats_tool, 
-                                 search_chat_tool, 
-                                 send_message_tool,
-                                 mark_chats_as_read_tool])
-
 
 # --- State Definition ---
 class State(TypedDict):
     action: Literal["message", "unread_summary"]
     messages: Annotated[list, add_messages]
     chats_to_select: Union[list, dict]
+    user_id: str
+    unread_chats: list
 
 def route_llm_request(state):
     last_message = state["messages"][-1]
@@ -38,6 +36,12 @@ def route_llm_request(state):
 
 # --- Workflow Nodes ---
 async def llm_with_tools_node(state):
+    client = create_telegram_client(state['user_id'])
+    llm_with_tools = llm.bind_tools([get_unread_chats_tool.bind(client), 
+                                 search_chat_tool.bind(client), 
+                                 send_message_tool.bind(client),
+                                 mark_chats_as_read_tool.bind(client)])
+    
     messages = state['messages']
     if isinstance(state['messages'][-1], ToolMessage) and state['messages'][-1].name == 'get_unread_chats_tool':
         messages[-1].content = SUMMARIZE_PROMPT_TEMPLATE.format(chats=messages[-1].content)
