@@ -10,7 +10,6 @@ from langgraph.graph.message import add_messages
 from typing_extensions import Literal, TypedDict
 
 from .prompts import SUMMARIZE_PROMPT_TEMPLATE, SYSTEM_MESSAGE
-from .telegram_utils import create_telegram_client
 from .tools import (
     get_unread_chats_tool,
     mark_chats_as_read_tool,
@@ -27,6 +26,7 @@ class State(TypedDict):
     chats_to_select: Union[list, dict]
     user_id: str
     unread_chats: list
+    thread_id: str
 
 def route_llm_request(state):
     last_message = state["messages"][-1]
@@ -36,11 +36,10 @@ def route_llm_request(state):
 
 # --- Workflow Nodes ---
 async def llm_with_tools_node(state):
-    client = create_telegram_client(state['user_id'])
-    llm_with_tools = llm.bind_tools([get_unread_chats_tool.bind(client), 
-                                 search_chat_tool.bind(client), 
-                                 send_message_tool.bind(client),
-                                 mark_chats_as_read_tool.bind(client)])
+    llm_with_tools = llm.bind_tools([get_unread_chats_tool, 
+                                 search_chat_tool, 
+                                 send_message_tool,
+                                 mark_chats_as_read_tool])
     
     messages = state['messages']
     if isinstance(state['messages'][-1], ToolMessage) and state['messages'][-1].name == 'get_unread_chats_tool':
@@ -60,12 +59,13 @@ async def tool_node(state):
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         tool_call = last_message.tool_calls[0]
         tool_name = tool_call["name"]
-        tool_args = tool_call["args"]
+        tool_kwargs = tool_call["args"]
+        tool_kwargs['user_id'] = state['user_id']
 
         # Find the tool by name and invoke it
         tool = next((t for t in [get_unread_chats_tool, search_chat_tool, send_message_tool] if t.name == tool_name), None)
         if tool:
-            tool_result = await tool.ainvoke(tool_args)
+            tool_result = await tool.ainvoke(tool_kwargs)
             state["messages"] += [ToolMessage(name=tool_name, content=str(tool_result), tool_call_id=tool_call['id'])]
             if tool_name == 'search_chat_tool' and isinstance(tool_result, list):
                 state['chats_to_select'] = tool_result
@@ -75,11 +75,10 @@ async def tool_node(state):
 
 
 # --- Workflow Setup ---
-def create_workflow():
+def create_workflow(memory=MemorySaver()):
     """
     Create and compile the workflow for processing unread messages and summarizing them.
     """
-    memory = MemorySaver()
     workflow = StateGraph(State)
     workflow.add_node("chat_node", llm_with_tools_node)
     workflow.add_node("tool_node", tool_node)
@@ -93,4 +92,4 @@ def create_workflow():
     )
 
 
-    return workflow.compile()
+    return workflow.compile(checkpointer=memory)

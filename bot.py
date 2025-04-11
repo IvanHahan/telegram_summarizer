@@ -22,13 +22,13 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
-    InvalidCallbackData,
     MessageHandler,
     PicklePersistence,
     filters,
 )
 
 from telegram_bot.persistance import clear_user_state, get_user_state, save_user_state
+from telegram_bot.redis_saver import AsyncRedisSaver
 from telegram_bot.telegram_utils import create_telegram_client, mark_chats_as_read
 from telegram_bot.workflow import create_workflow
 
@@ -41,7 +41,26 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 config = {"configurable": {"thread_id": str(uuid.uuid4())}}
-workflow = create_workflow()
+memory = AsyncRedisSaver.from_conn_info(
+    host=os.getenv("REDIS_HOST", "localhost"),
+    port=os.getenv("REDIS_PORT", 6379),
+    db=0,
+)
+from langgraph.checkpoint.memory import MemorySaver
+
+workflow = create_workflow(MemorySaver())
+
+async def chat_with_bot(user_id, message):
+    # state = await get_user_state(user_id)  # Retrieve state from Redis
+    # state['action'] = 'message'
+    # if not state.get('messages'):
+    #     state['messages'] = []
+    # state['messages'].append(HumanMessage(message))
+    state = await workflow.ainvoke(
+        {'messages': [HumanMessage(message)], 'user_id': str(user_id)}, config={'thread_id': user_id}
+    )
+    # await save_user_state(user_id, state)  # Save updated state to Redis
+    return state
 
 
 async def create_mark_as_read_handler(update: Update):
@@ -109,55 +128,79 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     clear_user_state(user_id)
     await update.effective_message.reply_text("All clear!")
 
-
-async def handle_invalid_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Informs the user that the button is no longer available."""
-    await update.callback_query.answer()
-    await update.effective_message.edit_text(
-        "Sorry, I could not process this button click 😕 Please send /start to get a new keyboard."
-    )
-
-async def chat_with_bot(user_id, message):
-    state = await get_user_state(user_id)  # Retrieve state from Redis
-    state['action'] = 'message'
-    if not state.get('messages'):
-        state['messages'] = []
-    state['messages'].append(HumanMessage(message))
-
-    state = await workflow.ainvoke(
-        state, config=config
-    )
-    return state
     
 
 async def handle_freeform_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles freeform text messages."""
-
+    """Handles freeform text messages from users."""
     user_id = update.effective_user.id
-
-    state = await chat_with_bot(user_id, update.message.text)
-    if isinstance(state['messages'][-1], AIMessage):
-        await update.message.reply_text(
-            state['messages'][-1].content
-        )
+    user_message = update.message.text
     
-    if 'unread_chats' in state and len(state['unread_chats']) > 0:
-        state['messages'].append(AIMessage("Would you like to mark them as read?"))
+    try:
+        # Process the message through the bot
+        state = await chat_with_bot(user_id, user_message)
+        
+        # Handle bot response
+        await send_bot_response(update, state)
+        
+        # Handle any follow-up actions from the state
+        await process_follow_up_actions(update, state)
+        
+        # Save the final state
+        await save_user_state(user_id, state)
+        
+    except Exception as e:
+        logger.error(f"Error processing message from user {user_id}: {str(e)}")
+        await update.message.reply_text(
+            "Sorry, I encountered an error while processing your message."
+        )
+
+
+async def send_bot_response(update: Update, state: dict) -> None:
+    """Sends the bot's response message to the user if available."""
+    # Safety check for messages array
+    if not state.get('messages'):
+        return
+    
+    try:
+        # Get the last message if it's an AI response
+        last_message = state['messages'][-1]
+        if isinstance(last_message, AIMessage) and hasattr(last_message, 'content'):
+            # Send the AI's response
+            await update.message.reply_text(last_message.content)
+    except IndexError:
+        logger.warning("Attempted to access last message but messages list was empty")
+    except Exception as e:
+        logger.error(f"Error sending bot response: {str(e)}")
+
+
+async def process_follow_up_actions(update: Update, state: dict) -> None:
+    """Process any follow-up actions based on the current state."""
+    # Handle unread chats
+    if state.get('unread_chats') and len(state['unread_chats']) > 0:
+        # Add a message about marking as read to the conversation
+        if 'messages' in state:
+            state['messages'].append(AIMessage("Would you like to mark them as read?"))
         await create_mark_as_read_handler(update)
     
-    if 'chats_to_select' in state and len(state['chats_to_select']) > 0:
-        state['messages'].append(AIMessage("Please select a chat to send a message to."))
+    # Handle chat selection
+    if state.get('chats_to_select') and len(state['chats_to_select']) > 0:
+        # Add a message about selecting a chat to the conversation
+        if 'messages' in state:
+            state['messages'].append(AIMessage("Please select a chat to send a message to."))
+        
+        # Create keyboard with chats
         keyboard = [
-            [InlineKeyboardButton(chat['chat_name'], callback_data=f"select_chat:{chat['chat_id']}")]
+            [InlineKeyboardButton(chat['chat_name'], 
+                                 callback_data=f"select_chat:{chat['chat_id']}")]
             for chat in state['chats_to_select']
         ]
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
             "Please select a chat to send a message to:",
             reply_markup=reply_markup
         )
 
-    await save_user_state(user_id, state)  # Save updated state to Redis
 
 async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the 'Mark as Read' button."""
@@ -236,9 +279,6 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("clear", clear))
-    application.add_handler(
-        CallbackQueryHandler(handle_invalid_button, pattern=InvalidCallbackData)
-    )
     application.add_handler(
         CallbackQueryHandler(mark_as_read, pattern="mark_as_read")
     )  # Add the new handler here
