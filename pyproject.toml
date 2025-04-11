@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "telegram-assistant"
+version = "0.1.0"
+description = "A Telegram bot for summarizing unread messages and managing chats."
+authors = ["ivanhahanov@gmail.com"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "telegram_bot"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+python-telegram-bot = "^20.3"
+telethon = "^1.29.0"
+redis = "^5.0.0"
+python-dotenv = "^1.0.0"
+langchain
+langgraph
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.4.0"
+black = "^23.3.0"
+flake8 = "^6.1.0"
+mypy = "^1.5.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
