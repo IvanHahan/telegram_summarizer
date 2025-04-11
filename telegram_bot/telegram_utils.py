@@ -147,15 +147,15 @@ async def search_chat(client, query, top_k=3):
         # Match by chat ID
         for dialog in dialogs:
             if dialog.id == query:
-                return [{
+                return {
                     "chat_name": dialog.name,
                     "chat_id": dialog.id,
                     "is_channel": dialog.is_channel,
                     "is_group": dialog.is_group,
                     "unread_count": dialog.unread_count,
-                }]
+                }
 
-    return []  # Return an empty list if no match is found
+    return None  # Return an empty list if no match is found
 
 async def send_message(client, chat_id, message):
     """

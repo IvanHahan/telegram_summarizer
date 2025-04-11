@@ -1,6 +1,6 @@
 import uuid
 
-from telegram_bot.workflow import create_workflow
+from telegram_bot.rigid_workflow import create_workflow
 
 
 # --- Main Execution ---
