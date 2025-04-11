@@ -1,0 +1,12 @@
+python-telegram-bot
+telethon
+redis
+python-dotenv
+langchain
+langgraph
+
+# Development dependencies
+pytest
+black
+flake8
+mypy
