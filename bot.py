@@ -11,13 +11,11 @@ Note:
 To use arbitrary callback data, you must install PTB via
 `pip install "python-telegram-bot[callback-data]"`
 """
-import json
 import logging
 import os
 import uuid
 
-import redis
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -30,6 +28,7 @@ from telegram.ext import (
     filters,
 )
 
+from telegram_bot.persistance import clear_user_state, get_user_state, save_user_state
 from telegram_bot.telegram_utils import create_telegram_client, mark_chats_as_read
 from telegram_bot.workflow import create_workflow
 
@@ -43,34 +42,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 config = {"configurable": {"thread_id": str(uuid.uuid4())}}
 workflow = create_workflow()
-
-# Initialize Redis client
-redis_client = redis.StrictRedis(host="localhost", port=6379, db=0, decode_responses=True)
-
-async def save_user_state(user_id: int, state: dict) -> None:
-    """Save user state to Redis."""
-    state['messages'] = [msg.to_json() for msg in state['messages']]
-    redis_client.set(f"user:{user_id}:state", json.dumps(state))
-
-def message_decoder(data):
-    if isinstance(data, dict) and "id" in data and "kwargs" in data:
-        class_id = data["id"]
-        kwargs = data["kwargs"]
-        if class_id[-1] == "HumanMessage":
-            return HumanMessage(**kwargs)
-        elif class_id[-1] == "AIMessage":
-            return AIMessage(**kwargs)
-        elif class_id[-1] == "ToolMessage":
-            return ToolMessage(**kwargs)
-    return data
-
-async def get_user_state(user_id: int) -> dict:
-    """Retrieve user state from Redis."""
-    state = redis_client.get(f"user:{user_id}:state")
-    state = json.loads(state) if state else {}
-    if state.get('messages'):
-        state['messages'] = [message_decoder(msg) for msg in state['messages']] 
-    return state
 
 
 async def create_mark_as_read_handler(update: Update):
@@ -135,7 +106,7 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.bot.callback_data_cache.clear_callback_queries()
     # Clear Redis cache for the user
     user_id = update.effective_user.id
-    redis_client.delete(f"user:{user_id}:state")
+    clear_user_state(user_id)
     await update.effective_message.reply_text("All clear!")
 
 
