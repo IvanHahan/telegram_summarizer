@@ -16,7 +16,13 @@ import os
 import uuid
 
 from langchain_core.messages import AIMessage, HumanMessage
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    Update,
+)
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -63,6 +69,36 @@ async def chat_with_bot(user_id, message):
     return state
 
 
+async def check_if_authorized(user_id: str):
+    client = await create_telegram_client(user_id)
+    await client.connect()
+    return client.is_user_authorized()
+
+
+async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    contact = update.message.contact
+    if contact is not None:
+        phone = contact.phone_number
+        user_id = contact.user_id
+        await update.message.reply_text(f"Thanks! Your number is {phone}")
+        if not await check_if_authorized(user_id):
+            client = await create_telegram_client(user_id)
+            await client.connect()
+            await client.send_code_request(phone)
+            await update.message.reply_text("Please enter the code sent to your phone:")
+
+async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    code = update.message.text
+    user_id = update.effective_user.id
+    client = await create_telegram_client(user_id)
+    await client.connect()
+    try:
+        await client.sign_in(phone_number=update.effective_user.phone_number, code=code)
+        await update.message.reply_text("You are now authorized!")
+    except Exception as e:
+        logger.error(f"Error during sign-in: {str(e)}")
+        await update.message.reply_text("Failed to authorize. Please try again.")
+
 async def create_mark_as_read_handler(update: Update):
     keyboard = [
             [
@@ -98,7 +134,7 @@ async def what_i_missed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await save_user_state(user_id, state)  # Save updated state to Redis
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the /start command."""
+    """Handles the /start command.""" 
     keyboard = [
         [InlineKeyboardButton("What I Missed", callback_data="what_i_missed")],
         [InlineKeyboardButton("Help", callback_data="help")],
@@ -134,6 +170,11 @@ async def handle_freeform_message(update: Update, context: ContextTypes.DEFAULT_
     """Handles freeform text messages from users."""
     user_id = update.effective_user.id
     user_message = update.message.text
+
+    if check_if_authorized(user_id):
+        button = KeyboardButton(text="Share your phone number", request_contact=True)
+        keyboard = ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
+        await update.message.reply_text("Please share your phone number:", reply_markup=keyboard)
     
     try:
         # Process the message through the bot
@@ -279,6 +320,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("clear", clear))
+    application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
     application.add_handler(
         CallbackQueryHandler(mark_as_read, pattern="mark_as_read")
     )  # Add the new handler here
