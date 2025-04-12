@@ -10,7 +10,7 @@ from telegram_bot.telegram_utils import (
 )
 
 from .prompts import SUMMARIZE_PROMPT_TEMPLATE
-from .utils import format_chats, llm
+from .utils import format_chats
 
 
 @tool

@@ -16,13 +16,7 @@ import os
 import uuid
 
 from langchain_core.messages import AIMessage, HumanMessage
-from telegram import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardMarkup,
-    Update,
-)
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -32,11 +26,11 @@ from telegram.ext import (
     PicklePersistence,
     filters,
 )
+from telethon.errors import PhoneCodeExpiredError
 
-from telegram_bot.persistance import clear_user_state, get_user_state, save_user_state
-from telegram_bot.redis_saver import AsyncRedisSaver
-from telegram_bot.telegram_utils import create_telegram_client, mark_chats_as_read
-from telegram_bot.workflow import create_workflow
+from telegram_bot.bot_utils import authorization_handler, bot_handler
+from telegram_bot.store import create_store
+from telegram_bot.telegram_utils import create_telegram_client, is_authorized
 
 # Enable logging
 logging.basicConfig(
@@ -46,33 +40,35 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
-config = {"configurable": {"thread_id": str(uuid.uuid4())}}
-memory = AsyncRedisSaver.from_conn_info(
-    host=os.getenv("REDIS_HOST", "localhost"),
-    port=os.getenv("REDIS_PORT", 6379),
-    db=0,
-)
-from langgraph.checkpoint.memory import MemorySaver
 
-workflow = create_workflow(MemorySaver())
-
-async def chat_with_bot(user_id, message):
-    # state = await get_user_state(user_id)  # Retrieve state from Redis
-    # state['action'] = 'message'
-    # if not state.get('messages'):
-    #     state['messages'] = []
-    # state['messages'].append(HumanMessage(message))
-    state = await workflow.ainvoke(
-        {'messages': [HumanMessage(message)], 'user_id': str(user_id)}, config={'thread_id': user_id}
-    )
-    # await save_user_state(user_id, state)  # Save updated state to Redis
-    return state
+store = create_store('async_redis')
 
 
-async def check_if_authorized(user_id: str):
-    client = await create_telegram_client(user_id)
-    await client.connect()
-    return client.is_user_authorized()
+async def get_thread_id(user_id):
+    thread_id = await store.get(f"thread_id:{user_id}")
+    if thread_id is None:
+        thread_id = uuid.uuid4().hex
+    await store.set(f"thread_id:{user_id}", thread_id, expire=1800)
+    return thread_id
+
+async def set_thread_id(user_id, thread_id):
+    await store.set(f"thread_id:{user_id}", thread_id, expire=1800)
+
+async def reset_thread_id(user_id):
+    await store.delete(f"thread_id:{user_id}")
+
+async def set_expire_for_user(user_id):
+    thread_id = await get_thread_id(user_id)
+    keys = await store.redis_client.keys(f"checkpoint${thread_id}*")
+    for key in keys:
+        await store.redis_client.setex(key, 1800)
+
+async def clear_for_user(user_id):
+    await store.delete(f"auth:{user_id}")
+    thread_id = await get_thread_id(user_id)
+    keys = await store.redis_client.keys(f"checkpoint${thread_id}*")
+    for key in keys:
+        await store.delete(key)
 
 
 async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -81,70 +77,55 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         phone = contact.phone_number
         user_id = contact.user_id
         await update.message.reply_text(f"Thanks! Your number is {phone}")
-        if not await check_if_authorized(user_id):
-            client = await create_telegram_client(user_id)
+        if not await is_authorized(user_id):
+            client = create_telegram_client(user_id)
             await client.connect()
-            await client.send_code_request(phone)
+            res = await client.send_code_request(phone)
+            await store.set_object(f"auth:{user_id}", {'phone': phone, 'phone_code_hash': res.phone_code_hash})
             await update.message.reply_text("Please enter the code sent to your phone:")
 
-async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_code(update: Update, auth: dict):
     code = update.message.text
     user_id = update.effective_user.id
-    client = await create_telegram_client(user_id)
+    client = create_telegram_client(user_id)
     await client.connect()
     try:
-        await client.sign_in(phone_number=update.effective_user.phone_number, code=code)
+        auth['code'] = code
+        await client.sign_in(**auth)
+        await store.delete(f"auth:{user_id}")
         await update.message.reply_text("You are now authorized!")
+    except PhoneCodeExpiredError:
+        await update.message.reply_text("The code has expired. Please try again.")
+        res = await client.send_code_request(auth['phone'])
+        await store.set_object(f"auth:{user_id}", {'phone': auth['phone'], 'phone_code_hash': res.phone_code_hash})
     except Exception as e:
         logger.error(f"Error during sign-in: {str(e)}")
         await update.message.reply_text("Failed to authorize. Please try again.")
 
-async def create_mark_as_read_handler(update: Update):
-    keyboard = [
-            [
-                InlineKeyboardButton("Mark as Read", callback_data="mark_as_read"),
-                InlineKeyboardButton("Cancel", callback_data="no_action")
-            ]
-        ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Would you like to mark unread as read?",
-        reply_markup=reply_markup
-    )
-
 
 async def what_i_missed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the 'What I Missed' request."""
-    user_id = update.effective_user.id
-    state = await get_user_state(user_id)  # Retrieve state from Redis
-    state['action'] = 'unread_summary'
-    
-    # Invoke the workflow and save the result
-    res = await workflow.ainvoke(state, config=config)
-    state['messages'] = res['messages']
-    state['unread_chats'] = res.get('unread_chats', [])
 
-    # Send the response to the user
-    await update.message.reply_text(res['messages'][-1].content)
+    await bot_handler(update, action='missed')
 
-    # If there are unread chats, prompt the user to mark them as read
-    if res['unread_chats']:
-        await create_mark_as_read_handler(update)
+async def analyze_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles the 'What I Missed' request."""
 
-    await save_user_state(user_id, state)  # Save updated state to Redis
+    await bot_handler(update, action='analyze', session_id=get_thread_id(update.effective_user.id))
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the /start command.""" 
-    keyboard = [
-        [InlineKeyboardButton("What I Missed", callback_data="what_i_missed")],
-        [InlineKeyboardButton("Help", callback_data="help")],
-        [InlineKeyboardButton("Clear", callback_data="clear")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Welcome to the Telegram Summarizer Bot! Use the buttons below to get started:",
-        reply_markup=reply_markup
-    )
+    if not authorization_handler(update):
+        keyboard = [
+            [InlineKeyboardButton("What I Missed", callback_data="what_i_missed")],
+            [InlineKeyboardButton("Help", callback_data="help")],
+            [InlineKeyboardButton("Clear", callback_data="clear")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "Welcome to the Telegram Summarizer Bot! Use the buttons below to get started:",
+            reply_markup=reply_markup
+        )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -161,102 +142,25 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.bot.callback_data_cache.clear_callback_queries()
     # Clear Redis cache for the user
     user_id = update.effective_user.id
-    clear_user_state(user_id)
+    await clear_for_user(user_id)
     await update.effective_message.reply_text("All clear!")
-
     
 
 async def handle_freeform_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles freeform text messages from users."""
-    user_id = update.effective_user.id
-    user_message = update.message.text
 
-    if check_if_authorized(user_id):
-        button = KeyboardButton(text="Share your phone number", request_contact=True)
-        keyboard = ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
-        await update.message.reply_text("Please share your phone number:", reply_markup=keyboard)
-    
-    try:
-        # Process the message through the bot
-        state = await chat_with_bot(user_id, user_message)
-        
-        # Handle bot response
-        await send_bot_response(update, state)
-        
-        # Handle any follow-up actions from the state
-        await process_follow_up_actions(update, state)
-        
-        # Save the final state
-        await save_user_state(user_id, state)
-        
-    except Exception as e:
-        logger.error(f"Error processing message from user {user_id}: {str(e)}")
-        await update.message.reply_text(
-            "Sorry, I encountered an error while processing your message."
-        )
-
-
-async def send_bot_response(update: Update, state: dict) -> None:
-    """Sends the bot's response message to the user if available."""
-    # Safety check for messages array
-    if not state.get('messages'):
-        return
-    
-    try:
-        # Get the last message if it's an AI response
-        last_message = state['messages'][-1]
-        if isinstance(last_message, AIMessage) and hasattr(last_message, 'content'):
-            # Send the AI's response
-            await update.message.reply_text(last_message.content)
-    except IndexError:
-        logger.warning("Attempted to access last message but messages list was empty")
-    except Exception as e:
-        logger.error(f"Error sending bot response: {str(e)}")
-
-
-async def process_follow_up_actions(update: Update, state: dict) -> None:
-    """Process any follow-up actions based on the current state."""
-    # Handle unread chats
-    if state.get('unread_chats') and len(state['unread_chats']) > 0:
-        # Add a message about marking as read to the conversation
-        if 'messages' in state:
-            state['messages'].append(AIMessage("Would you like to mark them as read?"))
-        await create_mark_as_read_handler(update)
-    
-    # Handle chat selection
-    if state.get('chats_to_select') and len(state['chats_to_select']) > 0:
-        # Add a message about selecting a chat to the conversation
-        if 'messages' in state:
-            state['messages'].append(AIMessage("Please select a chat to send a message to."))
-        
-        # Create keyboard with chats
-        keyboard = [
-            [InlineKeyboardButton(chat['chat_name'], 
-                                 callback_data=f"select_chat:{chat['chat_id']}")]
-            for chat in state['chats_to_select']
-        ]
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "Please select a chat to send a message to:",
-            reply_markup=reply_markup
-        )
-
+    auth = await store.get_object(f"auth:{update.effective_user.id}")
+    if auth:
+        await handle_code(update, auth)
+    else:
+        await bot_handler(update, 
+                          session_id=await get_thread_id(update.effective_user.id),
+                          action='message')
+        await set_expire_for_user(update.effective_user.id)
 
 async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the 'Mark as Read' button."""
-    user_id = update.effective_user.id
-    state = await get_user_state(user_id)  # Retrieve state from Redis
-    unread_chats = state.get('unread_chats', [])
-
-    # Mark chats as read
-    async with create_telegram_client() as client:
-        chat_ids = [chat['chat_id'] for chat in unread_chats]
-        await mark_chats_as_read(client, chat_ids)
-
-    state['messages'].append(AIMessage("Done! All unread messages have been marked as read."))
-    await update.effective_message.edit_text(state['messages'][-1].content)
-    await save_user_state(user_id, state)  # Save updated state to Redis
+    await bot_handler(update, action='mark_as_read')
 
 
 async def no_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -316,10 +220,11 @@ def main() -> None:
         .build()
     )
 
-    application.add_handler(CommandHandler("what_i_missed", what_i_missed))
+    application.add_handler(CommandHandler("missed", what_i_missed))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("clear", clear))
+    application.add_handler(CommandHandler("analyze", analyze_chat))
     application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
     application.add_handler(
         CallbackQueryHandler(mark_as_read, pattern="mark_as_read")

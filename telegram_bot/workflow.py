@@ -3,7 +3,8 @@
 
 from typing import Annotated, Union
 
-from langchain_core.messages import SystemMessage, ToolMessage
+from langchain.prompts import PromptTemplate
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -11,20 +12,28 @@ from typing_extensions import Literal, TypedDict
 
 from .prompts import SUMMARIZE_PROMPT_TEMPLATE, SYSTEM_MESSAGE
 from .tools import (
+    format_chats,
     get_unread_chats_tool,
     mark_chats_as_read_tool,
     search_chat_tool,
     send_message_tool,
 )
-from .utils import llm
+from .utils import create_llm
 
+llm = create_llm()
+llm_with_tools = llm.bind_tools([get_unread_chats_tool, 
+                                 search_chat_tool, 
+                                 send_message_tool,
+                                 mark_chats_as_read_tool])
 
 # --- State Definition ---
 class State(TypedDict):
-    action: Literal["message", "unread_summary"]
+    action: Literal["message", "unread_summary", "mark_as_read", 'auth_code', 'clear']
     messages: Annotated[list, add_messages]
     chats_to_select: Union[list, dict]
+    selected_chat: dict
     user_id: str
+    auth: dict
     unread_chats: list
     thread_id: str
 
@@ -34,12 +43,65 @@ def route_llm_request(state):
         return 'tool_node'
     return END
 
+def route_user_request(state):
+    if state['action'] == 'message':
+        return 'chat_node'
+    elif state['action'] == 'missed':
+        return 'unread_node'
+    elif state['action'] == 'mark_as_read':
+        return 'mark_as_read_node'
+
+async def unread_history_node(state):
+    state['messages'].append(HumanMessage('What I missed?'))
+
+    chats = await get_unread_chats_tool.invoke({'user_id': state['user_id']})
+    summarization_prompt = PromptTemplate(
+        input_variables=["chats", "optional_instruction"],
+        template=SUMMARIZE_PROMPT_TEMPLATE
+    ).partial(optional_instruction="")
+    limit_context_error = False
+
+    def func(chats, summarization_prompt):
+        nonlocal limit_context_error  # Use nonlocal to modify the variable in the enclosing scope
+        try:
+            return (summarization_prompt | llm).invoke(input={'chats': format_chats(chats)})
+        except Exception as e:
+            if e.code == 'context_length_exceeded':
+                if len(chats) < 5:
+                    for chat in chats:
+                        chat['unread_messages'] = chat['unread_messages'][:len(chat['unread_messages']) // 2]
+                chats = chats[:len(chats) // 2]
+                limit_context_error = True
+                summarization_prompt = summarization_prompt.partial(
+                    optional_instruction="Inform user that this is a partial summary due to context limitations"
+                )
+                return func(chats, summarization_prompt)
+
+    response = func(chats, summarization_prompt)
+    state['messages'] += [response]
+    return response
+
+async def mark_as_read_node(state):
+    unread_chats = state.get('unread_chats')
+    state['messages'].append(HumanMessage('Mark unread as read'))
+    if not unread_chats:
+        unread_chats = await get_unread_chats_tool.invoke({'user_id': state['user_id']})
+    
+    await mark_chats_as_read_tool.invoke({'user_id': state['user_id'], 
+                                    'chat_ids': [c['chat_id'] for c in unread_chats]})
+    
+    state['messages'].append(AIMessage('Done!'))
+
+async def select_chat_node(state):
+    chat = state['selected_chat']
+    state['messages'].append(HumanMessage(f"Selected with ID: {chat['chad_id']} and name: {chat['chad_name']}"))
+    state['messages'].append(AIMessage("Understood!"))
+
+async def clear_state_node(state):
+    return dict()
+
 # --- Workflow Nodes ---
 async def llm_with_tools_node(state):
-    llm_with_tools = llm.bind_tools([get_unread_chats_tool, 
-                                 search_chat_tool, 
-                                 send_message_tool,
-                                 mark_chats_as_read_tool])
     
     messages = state['messages']
     if isinstance(state['messages'][-1], ToolMessage) and state['messages'][-1].name == 'get_unread_chats_tool':
@@ -82,14 +144,17 @@ def create_workflow(memory=MemorySaver()):
     workflow = StateGraph(State)
     workflow.add_node("chat_node", llm_with_tools_node)
     workflow.add_node("tool_node", tool_node)
+    workflow.add_node("unread_node", unread_history_node)
+    workflow.add_node("mark_as_read_node", mark_as_read_node)
     
-    workflow.add_edge(START, 'chat_node')
+    workflow.add_conditional_edges(START, route_user_request, ["chat_node", "unread_node"])
     workflow.add_edge("tool_node", "chat_node")
+    workflow.add_edge('unread_node', END)
+    workflow.add_edge('mark_as_read_node', END)
     workflow.add_conditional_edges(
         "chat_node",
         route_llm_request,
         ["tool_node", END],
     )
 
-
-    return workflow.compile(checkpointer=memory)
+    return workflow.compile(checkpointer=memory, store=memory)

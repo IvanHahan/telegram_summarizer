@@ -12,8 +12,6 @@ def create_llm():
         model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
     )
 
-llm = create_llm()
-
 
 # --- Formatting Functions ---
 def format_chats(chats):
