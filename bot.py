@@ -96,8 +96,7 @@ async def handle_code(update: Update, auth: dict):
         await update.message.reply_text("You are now authorized!")
     except PhoneCodeExpiredError:
         await update.message.reply_text("The code has expired. Please try again.")
-        res = await client.send_code_request(auth['phone'])
-        await store.set_object(f"auth:{user_id}", {'phone': auth['phone'], 'phone_code_hash': res.phone_code_hash})
+        await clear_for_user(user_id)
     except Exception as e:
         logger.error(f"Error during sign-in: {str(e)}")
         await update.message.reply_text("Failed to authorize. Please try again.")
