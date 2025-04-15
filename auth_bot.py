@@ -5,6 +5,7 @@ import uuid
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     ConversationHandler,
@@ -22,10 +23,7 @@ from login_handler import (
 )
 from telegram_bot.store import create_store
 from telegram_bot.telegram_utils import is_authorized
-from telegram_bot.workflow import (
-    mark_as_read_workflow,
-    unread_history_workflow,
-)
+from telegram_bot.workflow import mark_as_read_workflow, unread_history_workflow
 
 # Enable logging
 logging.basicConfig(
@@ -48,22 +46,31 @@ def get_thread_id(context: ContextTypes.DEFAULT_TYPE):
     session_id = context.user_data.get('thread_id')
     return session_id
 
+async def is_bot_authorized(update: Update):
+    """Check if the user is authorized."""
+    user_id = update.effective_user.id
+    session_name = f"session_{user_id}"
+    return await is_authorized(session_name)
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /start command."""
-    await update.message.reply_text(
-        "Welcome! Use /authorize to log in with your phone number"
-    )
+    if not await is_bot_authorized(update):
+        authorize(update, context)
+    else:
+        await update.message.reply_text(
+            "You are already authorized. Use /summary to get your unread messages."
+        )
 
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    session_name = f"session_{user_id}"
-    if await is_authorized(session_name):
-        workflow = unread_history_workflow()
-        res = await workflow.ainvoke({}, config={'thread_id': get_thread_id(context)})
+
+    if await is_bot_authorized(update):
+        workflow = await unread_history_workflow()
+        res = await workflow.ainvoke({'user_id': 'session_' + str(update.effective_user.id)}, config={'thread_id': get_thread_id(context)})
+        context.user_data['unread_chats'] = res['unread_chats']
         await update.message.reply_text(res['messages'][-2].content)
         keyboard = [
-            [InlineKeyboardButton("Mark as Read", callback_data="mark_as_read")]
+            [InlineKeyboardButton("Mark as Read", callback_data="mark_as_read", )]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(res['messages'][-1].content, reply_markup=reply_markup)
@@ -72,12 +79,14 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /mark_as_read command."""
-    user_id = update.effective_user.id
-    session_name = f"session_{user_id}"
-    if await is_authorized(session_name):
-        workflow = mark_as_read_workflow()
-        res = await workflow.ainvoke({}, config={'thread_id': get_thread_id(context)})
-        await update.message.reply_text(res['messages'][-1].content)
+    if await is_bot_authorized(update):
+        workflow = await mark_as_read_workflow()
+        res = await workflow.ainvoke({'user_id': 'session_' + str(update.effective_user.id),
+                                      'unread_chats': context.user_data.get('unread_chats')}, 
+                                     config={'thread_id': get_thread_id(context)})
+        if 'unread_chats' in context.user_data:
+            del context.user_data['unread_chats']
+        await update.callback_query.edit_message_text(res['messages'][-1].content)
     else:
         await authorize(update, context)
 
@@ -99,7 +108,9 @@ def main() -> None:
     )
 
     application.add_handler(CommandHandler("summary", summary))
-    application.add_handler(CommandHandler("mark_as_read", mark_as_read))
+    application.add_handler(
+        CallbackQueryHandler(mark_as_read, pattern="mark_as_read")
+    )
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(auth_handler)

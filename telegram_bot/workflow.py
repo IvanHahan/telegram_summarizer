@@ -54,8 +54,9 @@ def route_user_request(state):
 async def unread_history_node(state):
     state['messages'].append(HumanMessage('What I missed?'))
 
-    chats = await get_unread_chats_tool.invoke({'user_id': state['user_id']})
-    state['messages'].append(ToolMessage(name='get_unread_chats_tool', content=format_chats(chats)))
+    chats = await get_unread_chats_tool.ainvoke({'user_id': state['user_id']})
+    state['unread_chats'] = chats
+    state['messages'].append(ToolMessage(name='get_unread_chats_tool', content=format_chats(chats), tool_call_id='get_unread_chats_tool'))
     summarization_prompt = PromptTemplate(
         input_variables=["chats", "optional_instruction"],
         template=SUMMARIZE_PROMPT_TEMPLATE
@@ -81,18 +82,19 @@ async def unread_history_node(state):
     response = func(chats, summarization_prompt)
     state['messages'] += [response]
     state['messages'].append(AIMessage("Would you like to mark messages as read?"))
-    return response
+    return state
 
 async def mark_as_read_node(state):
     unread_chats = state.get('unread_chats')
     state['messages'].append(HumanMessage('Mark unread as read'))
     if not unread_chats:
-        unread_chats = await get_unread_chats_tool.invoke({'user_id': state['user_id']})
+        unread_chats = await get_unread_chats_tool.ainvoke({'user_id': state['user_id']})
     
-    await mark_chats_as_read_tool.invoke({'user_id': state['user_id'], 
+    await mark_chats_as_read_tool.ainvoke({'user_id': state['user_id'], 
                                     'chat_ids': [c['chat_id'] for c in unread_chats]})
     state['unread_chats'] = []
     state['messages'].append(AIMessage('Done!'))
+    return state
 
 async def select_chat_node(state):
     chat = state['selected_chat']
@@ -143,7 +145,7 @@ def create_memory(memory_type: str = "redis"):
     """
     if memory_type == "redis":
         return AsyncRedisSaver.from_conn_string(
-            f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', 6379)}/0"
+            os.getenv("REDIS_URL", "redis://localhost:6379/0")
     )
     elif memory_type == "memory_saver":
         return MemorySaver()
@@ -169,11 +171,10 @@ def chat_workflow(memory='redis'):
         ["tool_node", END],
     )
 
-    memory = create_memory(memory)
-    return workflow.compile(checkpointer=memory)#, store=memory)
+    return workflow.compile(checkpointer=checkpointer)#, store=memory)
 
 
-def unread_history_workflow(memory='redis'):
+async def unread_history_workflow(memory='redis'):
     """
     Create and compile the workflow for processing unread messages and summarizing them.
     """
@@ -183,10 +184,10 @@ def unread_history_workflow(memory='redis'):
     workflow.add_edge(START, "unread_node")
     workflow.add_edge('unread_node', END)
     
-    memory = create_memory(memory)
-    return workflow.compile(checkpointer=memory)#, store=memory)
+    async with create_memory(memory) as checkpointer:
+        return workflow.compile(checkpointer=checkpointer)#, store=memory)
 
-def mark_as_read_workflow(memory='redis'):
+async def mark_as_read_workflow(memory='redis'):
     """
     Create and compile the workflow for processing unread messages and summarizing them.
     """
@@ -196,5 +197,5 @@ def mark_as_read_workflow(memory='redis'):
     workflow.add_edge(START, "mark_as_read_node")
     workflow.add_edge('mark_as_read_node', END)
     
-    memory = create_memory(memory)
-    return workflow.compile(checkpointer=memory)#, store=memory)
+    async with create_memory(memory) as checkpointer:
+        return workflow.compile(checkpointer=checkpointer)#, store=memory)

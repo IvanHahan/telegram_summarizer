@@ -194,7 +194,9 @@ def create_telegram_client(session_name="session_name", api_id=api_id, api_hash=
 async def is_authorized(user_id: str):
     client = create_telegram_client(user_id)
     await client.connect()
-    return await client.is_user_authorized()
+    res = await client.is_user_authorized()
+    await client.disconnect()
+    return res
 
 if __name__ == "__main__":
     # Example usage
