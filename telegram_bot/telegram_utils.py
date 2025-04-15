@@ -65,11 +65,39 @@ async def get_unread_chats(client,
                         "chat_name": dialog.name,
                         "chat_id": dialog.id,
                         "unread_count": dialog.unread_count,
-                        "unread_messages": unread_messages,
+                        "messages": unread_messages,
                         "is_channel": dialog.is_channel,
                         "is_group": dialog.is_group,
                     })
     return unread_chats
+
+async def get_chat_history(client, chat_id, hours=10):
+    """
+    Retrieve the message history of a specific chat within a given number of days.
+
+    Args:
+        client (TelegramClient): An instance of the TelegramClient.
+        chat_id (int or str): The ID or username of the chat to retrieve the history from.
+        max_days (int): The maximum number of days to look back for messages.
+
+    Returns:
+        list: A list of dictionaries containing message details.
+    """
+    messages = []
+    async for message in client.iter_messages(chat_id):
+        if (datetime.now(timezone.utc) - message.date).seconds > (hours * 3600):
+            break
+        sender_name = None
+        if message.sender and hasattr(message.sender, 'first_name'):
+            sender_name = message.sender.first_name or message.sender.last_name or message.sender.username
+        messages.append({
+            "text": message.text,
+            "sender_id": message.sender_id,
+            "date": message.date,
+        })
+        if sender_name:
+            messages[-1]["sender_name"] = sender_name
+    return messages
 
 async def mark_chats_as_read(client, chat_ids):
     """
@@ -140,6 +168,8 @@ async def search_chat(client, query, top_k=3):
 
         # Sort results by similarity in descending order and return the top-k
         results = sorted(results, key=lambda x: x["similarity"], reverse=True)[:top_k]
+        if results[0]["similarity"] == 1:
+            return results[0]  # Return the best match if it's an exact match
         return results
 
     elif isinstance(query, int):

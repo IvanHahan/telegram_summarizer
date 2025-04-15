@@ -24,6 +24,14 @@ SUMMARIZE_PROMPT_TEMPLATE = """
     the chats are: {chats}
 """
 
+ANALYZE_CHAT_PROMPT_TEMPLATE = """
+    Analyze the given chat and provide insights about it.
+    Analyze sentiment, engagement, and any other relevant metrics.
+    Provide a summary of the chat's activity and any notable trends.
+    You must give your answer in Ukrainian language.
+    
+    the chat is: {chat}
+"""
 
 ReAct_PROMPT_TEMPLATE = """
 {instructions}

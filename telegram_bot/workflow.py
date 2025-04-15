@@ -12,7 +12,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import Literal, TypedDict
 
-from .prompts import SUMMARIZE_PROMPT_TEMPLATE, SYSTEM_MESSAGE
+from .prompts import (
+    ANALYZE_CHAT_PROMPT_TEMPLATE,
+    SUMMARIZE_PROMPT_TEMPLATE,
+    SYSTEM_MESSAGE,
+)
 from .tools import (
     format_chats,
     get_unread_chats_tool,
@@ -84,6 +88,20 @@ async def unread_history_node(state):
     state['messages'].append(AIMessage("Would you like to mark messages as read?"))
     return state
 
+async def analyze_chat_node(state):
+    state['messages'].append(HumanMessage('Analyze given chat'))
+    chat = state.get('selected_chat')
+    if not chat:
+        return AIMessage("No chat selected for analysis.")
+    
+    summarization_prompt = PromptTemplate(
+        input_variables=["chat"],
+        template=ANALYZE_CHAT_PROMPT_TEMPLATE
+    )
+    
+    response = (summarization_prompt | llm).invoke(input={'chat': format_chats([chat])})
+    return response
+
 async def mark_as_read_node(state):
     unread_chats = state.get('unread_chats')
     state['messages'].append(HumanMessage('Mark unread as read'))
@@ -152,7 +170,7 @@ def create_memory(memory_type: str = "redis"):
 
 
 # --- Workflow Setup ---
-def chat_workflow(memory='redis'):
+async def chat_workflow(memory='redis'):
     """
     Create and compile the workflow for processing unread messages and summarizing them.
     """
@@ -171,7 +189,8 @@ def chat_workflow(memory='redis'):
         ["tool_node", END],
     )
 
-    return workflow.compile(checkpointer=checkpointer)#, store=memory)
+    async with create_memory(memory) as checkpointer:
+        return workflow.compile(checkpointer=checkpointer)#, store=memory)
 
 
 async def unread_history_workflow(memory='redis'):
@@ -198,4 +217,17 @@ async def mark_as_read_workflow(memory='redis'):
     workflow.add_edge('mark_as_read_node', END)
     
     async with create_memory(memory) as checkpointer:
+        return workflow.compile(checkpointer=checkpointer)#, store=memory)
+
+async def analyze_chat_workflow():
+    """
+    Create and compile the workflow for analyzing a chat.
+    """
+    workflow = StateGraph(State)
+    workflow.add_node("analyze_chat_node", analyze_chat_node)
+    
+    workflow.add_edge(START, "analyze_chat_node")
+    workflow.add_edge('analyze_chat_node', END)
+    
+    async with create_memory() as checkpointer:
         return workflow.compile(checkpointer=checkpointer)#, store=memory)

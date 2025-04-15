@@ -21,9 +21,9 @@ def format_chats(chats):
     formatted_chats = []
     for chat in chats:
         chat_name = chat["chat_name"]
-        unread_messages = chat["unread_messages"]
+        messages = chat["messages"]
         formatted_messages = [
-            f"{msg['sender_name']}: {msg['text']}" if 'sender_name' in msg else msg['text'] for msg in unread_messages
+            f"{msg['sender_name']}: {msg['text']}" if 'sender_name' in msg else msg['text'] for msg in messages
         ]
         title = 'Chat'
         if chat["is_channel"]:
