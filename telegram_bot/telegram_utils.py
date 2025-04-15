@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
 from dotenv import load_dotenv
-from telethon.sync import TelegramClient
+from telethon import TelegramClient
 
 load_dotenv()
 

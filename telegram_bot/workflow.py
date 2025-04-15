@@ -1,11 +1,13 @@
 
 
 
+import os
 from typing import Annotated, Union
 
 from langchain.prompts import PromptTemplate
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.redis import AsyncRedisSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import Literal, TypedDict
@@ -46,8 +48,6 @@ def route_llm_request(state):
 def route_user_request(state):
     if state['action'] == 'message':
         return 'chat_node'
-    elif state['action'] == 'missed':
-        return 'unread_node'
     elif state['action'] == 'mark_as_read':
         return 'mark_as_read_node'
 
@@ -55,6 +55,7 @@ async def unread_history_node(state):
     state['messages'].append(HumanMessage('What I missed?'))
 
     chats = await get_unread_chats_tool.invoke({'user_id': state['user_id']})
+    state['messages'].append(ToolMessage(name='get_unread_chats_tool', content=format_chats(chats)))
     summarization_prompt = PromptTemplate(
         input_variables=["chats", "optional_instruction"],
         template=SUMMARIZE_PROMPT_TEMPLATE
@@ -79,6 +80,7 @@ async def unread_history_node(state):
 
     response = func(chats, summarization_prompt)
     state['messages'] += [response]
+    state['messages'].append(AIMessage("Would you like to mark messages as read?"))
     return response
 
 async def mark_as_read_node(state):
@@ -89,7 +91,7 @@ async def mark_as_read_node(state):
     
     await mark_chats_as_read_tool.invoke({'user_id': state['user_id'], 
                                     'chat_ids': [c['chat_id'] for c in unread_chats]})
-    
+    state['unread_chats'] = []
     state['messages'].append(AIMessage('Done!'))
 
 async def select_chat_node(state):
@@ -135,19 +137,29 @@ async def tool_node(state):
                 state['unread_chats'] = tool_result
     return state
 
+def create_memory(memory_type: str = "redis"):
+    """
+    Create a memory instance based on the specified type.
+    """
+    if memory_type == "redis":
+        return AsyncRedisSaver.from_conn_string(
+            f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', 6379)}/0"
+    )
+    elif memory_type == "memory_saver":
+        return MemorySaver()
+
 
 # --- Workflow Setup ---
-def create_workflow(memory=MemorySaver()):
+def chat_workflow(memory='redis'):
     """
     Create and compile the workflow for processing unread messages and summarizing them.
     """
     workflow = StateGraph(State)
     workflow.add_node("chat_node", llm_with_tools_node)
     workflow.add_node("tool_node", tool_node)
-    workflow.add_node("unread_node", unread_history_node)
     workflow.add_node("mark_as_read_node", mark_as_read_node)
     
-    workflow.add_conditional_edges(START, route_user_request, ["chat_node", "unread_node"])
+    workflow.add_edge(START, "chat_node")
     workflow.add_edge("tool_node", "chat_node")
     workflow.add_edge('unread_node', END)
     workflow.add_edge('mark_as_read_node', END)
@@ -157,4 +169,32 @@ def create_workflow(memory=MemorySaver()):
         ["tool_node", END],
     )
 
-    return workflow.compile(checkpointer=memory, store=memory)
+    memory = create_memory(memory)
+    return workflow.compile(checkpointer=memory)#, store=memory)
+
+
+def unread_history_workflow(memory='redis'):
+    """
+    Create and compile the workflow for processing unread messages and summarizing them.
+    """
+    workflow = StateGraph(State)
+    workflow.add_node("unread_node", unread_history_node)
+    
+    workflow.add_edge(START, "unread_node")
+    workflow.add_edge('unread_node', END)
+    
+    memory = create_memory(memory)
+    return workflow.compile(checkpointer=memory)#, store=memory)
+
+def mark_as_read_workflow(memory='redis'):
+    """
+    Create and compile the workflow for processing unread messages and summarizing them.
+    """
+    workflow = StateGraph(State)
+    workflow.add_node("mark_as_read_node", mark_as_read_node)
+    
+    workflow.add_edge(START, "mark_as_read_node")
+    workflow.add_edge('mark_as_read_node', END)
+    
+    memory = create_memory(memory)
+    return workflow.compile(checkpointer=memory)#, store=memory)
