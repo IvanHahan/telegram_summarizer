@@ -9,7 +9,7 @@ from telethon.errors import (
     SessionPasswordNeededError,
 )
 
-from telegram_bot.telegram_utils import create_telegram_client
+from telegram_bot.telegram_utils import create_telegram_client, is_authorized
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,9 @@ OBFUSCATION_CONSTANT = 1000
 
 async def authorize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the authorization process by requesting contact sharing."""
+    if await is_authorized(f"session_{update.effective_user.id}"):
+        await update.message.reply_text("You are already authorized!")
+        return ConversationHandler.END
     contact_button = KeyboardButton("Share Contact", request_contact=True)
     reply_markup = ReplyKeyboardMarkup([[contact_button]], one_time_keyboard=True, resize_keyboard=True)
     
@@ -123,6 +126,35 @@ async def receive_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return ENTER_CODE
 
 
+async def receive_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle the user's password for two-factor authentication."""
+    user_id = update.effective_user.id
+    if 'client' not in context.user_data or 'phone_number' not in context.user_data:
+        await update.message.reply_text("No active authorization session. Please start with /authorize.")
+        return ConversationHandler.END
+
+    client = context.user_data['client']
+    password = update.message.text.strip()
+
+    try:
+        await client.sign_in(password=password)
+        await update.message.reply_text("Authorization successful with 2FA!")
+        await client.disconnect()
+        context.user_data.clear()
+        return ConversationHandler.END
+    except FloodWaitError as e:
+        await update.message.reply_text(f"Too many attempts. Please wait {e.seconds} seconds and try again.")
+        await client.disconnect()
+        context.user_data.clear()
+        return ConversationHandler.END
+    except Exception as e:
+        logger.error(f"Password sign-in error: {e}")
+        await update.message.reply_text(
+            f"Invalid password or error: {e}. Please try again or use /cancel to stop."
+        )
+        return ENTER_PASSWORD
+
+
 async def resend_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Resend the authorization code."""
     client = context.user_data.get('client')
@@ -159,4 +191,19 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await client.disconnect()
     context.user_data.clear()
     await update.message.reply_text("Authorization cancelled.")
+    return ConversationHandler.END
+
+
+async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Log out the user."""
+    user_id = update.effective_user.id
+    session_name = f"session_{user_id}"
+    
+    if await is_authorized(session_name):
+        async with create_telegram_client(session_name) as client:
+            await client.log_out()
+        await update.message.reply_text("You have been logged out.")
+    else:
+        await update.message.reply_text("You are not logged in.")
+    
     return ConversationHandler.END
