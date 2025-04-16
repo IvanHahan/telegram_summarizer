@@ -139,10 +139,11 @@ async def handle_chat_query(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             messages = await get_chat_history(client, chat_id)
             selected_chat['messages'] = messages
             workflow = await analyze_chat_workflow()
-            analysis_result = await workflow.ainvoke(
+            state = await workflow.ainvoke(
                 {'user_id': f'session_{user_id}', 'selected_chat': selected_chat},
                 config={'thread_id': get_thread_id(context)}
             )
+            analysis_result = state['messages'][-1].content
 
         await update.message.reply_text(
             f"Analysis of chat '{chat_name}':\n{analysis_result}",
@@ -193,10 +194,11 @@ async def handle_chat_selection(update: Update, context: ContextTypes.DEFAULT_TY
         messages = await get_chat_history(client, chat_id)
         selected_chat['messages'] = messages
         workflow = await analyze_chat_workflow()
-        analysis_result = await workflow.ainvoke(
+        state = await workflow.ainvoke(
             {'user_id': f'session_{user_id}', 'selected_chat': selected_chat},
             config={'thread_id': get_thread_id(context)}
         )
+        analysis_result = state['messages'][-1].content
 
     await update.message.reply_text(
         f"Analysis of chat '{selected_chat_title}':\n{analysis_result}",

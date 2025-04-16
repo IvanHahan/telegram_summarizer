@@ -92,15 +92,15 @@ async def analyze_chat_node(state):
     state['messages'].append(HumanMessage('Analyze given chat'))
     chat = state.get('selected_chat')
     if not chat:
-        return AIMessage("No chat selected for analysis.")
+        return {'messages': [AIMessage("No chat selected for analysis.")]}
     
     summarization_prompt = PromptTemplate(
         input_variables=["chat"],
         template=ANALYZE_CHAT_PROMPT_TEMPLATE
     )
-    
+
     response = (summarization_prompt | llm).invoke(input={'chat': format_chats([chat])})
-    return response
+    return {'messages': [response]}
 
 async def mark_as_read_node(state):
     unread_chats = state.get('unread_chats')
