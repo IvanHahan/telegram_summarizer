@@ -57,33 +57,18 @@ def route_user_request(state):
 
 async def unread_history_node(state):
     state['messages'].append(HumanMessage('What I missed?'))
-
-    chats = await get_unread_chats_tool.ainvoke({'user_id': state['user_id']})
+    unread_chats = state.get('unread_chats')
+    if not unread_chats:
+        chats = await get_unread_chats_tool.ainvoke({'user_id': state['user_id']})
+        
     state['unread_chats'] = chats
     state['messages'].append(ToolMessage(name='get_unread_chats_tool', content=format_chats(chats), tool_call_id='get_unread_chats_tool'))
     summarization_prompt = PromptTemplate(
         input_variables=["chats", "optional_instruction"],
         template=SUMMARIZE_PROMPT_TEMPLATE
     ).partial(optional_instruction="")
-    limit_context_error = False
 
-    def func(chats, summarization_prompt):
-        nonlocal limit_context_error  # Use nonlocal to modify the variable in the enclosing scope
-        try:
-            return (summarization_prompt | llm).invoke(input={'chats': format_chats(chats)})
-        except Exception as e:
-            if e.code == 'context_length_exceeded':
-                if len(chats) < 5:
-                    for chat in chats:
-                        chat['unread_messages'] = chat['unread_messages'][:len(chat['unread_messages']) // 2]
-                chats = chats[:len(chats) // 2]
-                limit_context_error = True
-                summarization_prompt = summarization_prompt.partial(
-                    optional_instruction="Inform user that this is a partial summary due to context limitations"
-                )
-                return func(chats, summarization_prompt)
-
-    response = func(chats, summarization_prompt)
+    response = (summarization_prompt | llm).invoke(input={'chats': format_chats(chats)})
     state['messages'] += [response]
     state['messages'].append(AIMessage("Would you like to mark messages as read?"))
     return state
