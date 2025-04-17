@@ -200,12 +200,6 @@ async def analyze_selected_chat(update: Update, context: ContextTypes.DEFAULT_TY
     return ConversationHandler.END
 
 
-async def cancel_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancel the chat analysis conversation."""
-    await update.message.reply_text("Chat analysis canceled.", reply_markup=ReplyKeyboardRemove())
-    return ConversationHandler.END
-
-
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle incoming messages."""
     user_id = update.effective_user.id
@@ -226,6 +220,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     chats_to_select = state.get('chats_to_select')
     if chats_to_select:
+        await workflow.update_state('chats_to_select', None)
         context.user_data['chat_results'] = chats_to_select
         keyboard = [[chat['chat_name']] for chat in chats_to_select]
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
@@ -259,15 +254,28 @@ def main() -> None:
             ENTER_CHAT_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_query)],
             SELECT_CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_selection)],
         },
-        fallbacks=[CommandHandler("cancel", cancel_analyze)],
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    chat_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler)],
+        states={
+            ENTER_CHAT_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_query)],
+            SELECT_CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_selection)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
     )
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("summary", summary))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    # application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_selection), group=SELECT_CHAT)
     application.add_handler(CallbackQueryHandler(mark_as_read, pattern="mark_as_read"))
     application.add_handler(auth_handler)
     application.add_handler(analyze_handler)
+    application.add_handler(chat_handler)
+
+    # Then add the global message handler
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
