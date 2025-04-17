@@ -36,6 +36,7 @@ from telegram_bot.telegram_utils import (
 )
 from telegram_bot.workflow import (
     analyze_chat_workflow,
+    chat_workflow,
     mark_as_read_workflow,
     unread_history_workflow,
 )
@@ -203,6 +204,26 @@ async def cancel_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Cancel the chat analysis conversation."""
     await update.message.reply_text("Chat analysis canceled.", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
+
+
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle incoming messages."""
+    user_id = update.effective_user.id
+    session_name = f"session_{user_id}"
+
+    if not await is_bot_authorized(update):
+        await authorize(update, context)
+        return
+
+    async with create_telegram_client(session_name) as client:
+        # Process the incoming message
+        workflow = await chat_workflow()
+        state = await workflow.ainvoke(
+            {'user_id': session_name, 'message': update.message.text},
+            config={'thread_id': get_thread_id(context)}
+        )
+        response = state['messages'][-1].content
+        await update.message.reply_text(response)
 
 
 def main() -> None:
