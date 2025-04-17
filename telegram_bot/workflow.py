@@ -23,14 +23,36 @@ from .tools import (
     mark_chats_as_read_tool,
     search_chat_tool,
     send_message_tool,
+    tool,
 )
 from .utils import create_llm
+
+
+@tool
+def summarize_unread_chats_tool(formatted_chats: str):
+    """
+    Generate a summary of unread history.
+    Always call it when the user asks for unread history.
+    """
+    pass
+
+
+@tool 
+def analyze_retrieved_chat_tool(formatted_chat: str):
+    """
+    Generate analysis of a retrieved chat.
+    Always call it when the user asks for chat analysis.
+    """
+    pass
+
 
 llm = create_llm()
 llm_with_tools = llm.bind_tools([get_unread_chats_tool, 
                                  search_chat_tool, 
                                  send_message_tool,
-                                 mark_chats_as_read_tool])
+                                 mark_chats_as_read_tool,
+                                 summarize_unread_chats_tool, 
+                                 analyze_retrieved_chat_tool])
 
 # --- State Definition ---
 class State(TypedDict):
@@ -46,7 +68,12 @@ class State(TypedDict):
 def route_llm_request(state):
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        if last_message.tool_calls[0]["name"] == "summarize_unread_chats_tool":
+            return 'unread_node'
+        elif last_message.tool_calls[0]["name"] == "analyze_retrieved_chat_tool":
+            return 'analyze_chat_node'
         return 'tool_node'
+    
     return END
 
 def route_user_request(state):
@@ -163,15 +190,24 @@ async def chat_workflow(memory='redis'):
     workflow.add_node("chat_node", llm_with_tools_node)
     workflow.add_node("tool_node", tool_node)
     workflow.add_node("mark_as_read_node", mark_as_read_node)
-    
+    workflow.add_node("unread_node", unread_history_node)
+    workflow.add_node("analyze_chat_node", analyze_chat_node)
+
     workflow.add_edge(START, "chat_node")
     workflow.add_edge("tool_node", "chat_node")
     workflow.add_edge('unread_node', END)
+    workflow.add_edge('analyze_chat_node', END)
     workflow.add_edge('mark_as_read_node', END)
     workflow.add_conditional_edges(
         "chat_node",
         route_llm_request,
         ["tool_node", END],
+    )
+
+    workflow.add_conditional_edges(
+        "chat_node",
+        route_llm_request,
+        ["tool_node", 'unread_node', 'analyze_chat_node', END],
     )
 
     async with create_memory(memory) as checkpointer:
