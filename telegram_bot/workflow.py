@@ -139,11 +139,6 @@ async def clear_state_node(state: State) -> State:
 
 async def llm_with_tools_node(state: State) -> State:
     messages = state["messages"]
-    if isinstance(messages[-1], ToolMessage):
-        if messages[-1].name == "get_unread_chats_tool":
-            messages[-1].content = SUMMARIZE_PROMPT_TEMPLATE.format(chats=messages[-1].content)
-        elif messages[-1].name == "search_chat_tool":
-            return state
     system_msgs = [SystemMessage(SYSTEM_MESSAGE)] + messages
     response = llm_with_tools.invoke(input=system_msgs)
     state["messages"].append(response)
@@ -166,13 +161,18 @@ async def tool_node(state: State) -> State:
         )
         if tool:
             tool_result = await tool.ainvoke(tool_kwargs)
-            state["messages"].append(
-                ToolMessage(name=tool_name, content=str(tool_result), tool_call_id=tool_call["id"])
-            )
             if tool_name == "search_chat_tool" and isinstance(tool_result, list):
+                msg = 'Chats to select from: ' + str(tool_result)
+                state["messages"].append(
+                    ToolMessage(name=tool_name, content=msg, tool_call_id=tool_call["id"])
+                )
                 state["chats_to_select"] = tool_result
+                return state
             elif tool_name == "get_unread_chats_tool":
                 state["unread_chats"] = tool_result
+            state["messages"].append(
+                ToolMessage(name=tool_name, content=tool_result, tool_call_id=tool_call["id"])
+            )
     return state
 
 # --- Memory Creation ---
@@ -201,7 +201,6 @@ async def chat_workflow(memory: str = "redis"):
     workflow.add_edge("unread_node", END)
     workflow.add_edge("analyze_chat_node", END)
     workflow.add_edge("mark_as_read_node", END)
-    workflow.add_conditional_edges("chat_node", route_llm_request, ["tool_node", END])
     workflow.add_conditional_edges("chat_node", route_llm_request, ["tool_node", "unread_node", "analyze_chat_node", END])
 
     async with create_memory(memory) as checkpointer:

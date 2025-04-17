@@ -215,20 +215,30 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await authorize(update, context)
         return
 
-    async with create_telegram_client(session_name) as client:
-        # Process the incoming message
-        workflow = await chat_workflow()
-        state = await workflow.ainvoke(
-            {'user_id': session_name, 'message': update.message.text},
-            config={'thread_id': get_thread_id(context)}
+    # Process the incoming message
+    workflow = await chat_workflow()
+    state = await workflow.ainvoke(
+        {'user_id': session_name, 'messages': [update.message.text]},
+        config={'thread_id': get_thread_id(context)}
+    )
+    response = state['messages'][-1].content
+    await update.message.reply_text(response)
+
+    chats_to_select = state.get('chats_to_select')
+    if chats_to_select:
+        context.user_data['chat_results'] = chats_to_select
+        keyboard = [[chat['chat_name']] for chat in chats_to_select]
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        await update.message.reply_text(
+            "I found the following chats. Please select one:",
+            reply_markup=reply_markup,
         )
-        response = state['messages'][-1].content
-        await update.message.reply_text(response)
+        return SELECT_CHAT
 
 
 def main() -> None:
     """Run the Telegram bot."""
-    application = ApplicationBuilder().token(os.getenv("TELEGRAM_TOKEN")).build()
+    application = ApplicationBuilder().arbitrary_callback_data(True).token(os.getenv("TELEGRAM_TOKEN")).build()
 
     auth_handler = ConversationHandler(
         entry_points=[CommandHandler("authorize", authorize)],
