@@ -254,6 +254,7 @@ def main() -> None:
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("summary", summary))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     application.add_handler(CallbackQueryHandler(mark_as_read, pattern="mark_as_read"))
     application.add_handler(auth_handler)
     application.add_handler(analyze_handler)
