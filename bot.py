@@ -71,8 +71,7 @@ def get_thread_id(context: ContextTypes.DEFAULT_TYPE) -> str:
 async def is_bot_authorized(update: Update) -> bool:
     """Check if the current user is authorized."""
     user_id = update.effective_user.id
-    session_name = f"session_{user_id}"
-    return await is_authorized(session_name)
+    return await is_authorized(user_id)
 
 
 def get_actions_keyboard() -> ReplyKeyboardMarkup:
@@ -137,7 +136,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
         workflow = await unread_history_workflow()
         res = await workflow.ainvoke(
-            {'user_id': f"session_{user_id}"},
+            {'user_id': user_id},
             config={'thread_id': get_thread_id(context)}
         )
         context.user_data['unread_chats'] = res.get('unread_chats')
@@ -162,7 +161,7 @@ async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         workflow = await mark_as_read_workflow()
         res = await workflow.ainvoke(
             {
-                'user_id': f"session_{user_id}",
+                'user_id': user_id,
                 'unread_chats': context.user_data.get('unread_chats')
             },
             config={'thread_id': get_thread_id(context)}
@@ -197,7 +196,7 @@ async def handle_chat_query(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.message.text
     user_id = update.effective_user.id
 
-    async with create_telegram_client(f"session_{user_id}") as client:
+    async with create_telegram_client(user_id) as client:
         results = await search_chat(client, query, top_k=5)
 
     # If the result is a single chat, analyze immediately
@@ -239,13 +238,13 @@ async def analyze_selected_chat(update: Update, context: ContextTypes.DEFAULT_TY
     chat_id = selected_chat['chat_id']
     chat_name = selected_chat['chat_name']
 
-    async with create_telegram_client(f"session_{user_id}") as client:
+    async with create_telegram_client(user_id) as client:
         messages = await get_chat_history(client, chat_id)
         selected_chat['messages'] = messages
 
     workflow = await analyze_chat_workflow()
     state = await workflow.ainvoke(
-        {'user_id': f"session_{user_id}", 'selected_chat': selected_chat},
+        {'user_id': user_id, 'selected_chat': selected_chat},
         config={'thread_id': get_thread_id(context)}
     )
     analysis_result = state['messages'][-1].content
@@ -259,7 +258,7 @@ async def analyze_selected_chat(update: Update, context: ContextTypes.DEFAULT_TY
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle incoming messages."""
     user_id = update.effective_user.id
-    session_name = f"session_{user_id}"
+    session_name = user_id
 
     if not await is_bot_authorized(update):
         await authorize(update, context)
@@ -346,9 +345,9 @@ def main() -> None:
     application.add_handler(CommandHandler("summary", summary))
     application.add_handler(CommandHandler("logout", logout))
     application.add_handler(CallbackQueryHandler(mark_as_read, pattern="mark_as_read"))
-    application.add_handler(auth_handler)
-    application.add_handler(analyze_handler)
     application.add_handler(chat_handler)
+    application.add_handler(analyze_handler)
+    application.add_handler(auth_handler)
 
     # Add help handler
     application.add_handler(

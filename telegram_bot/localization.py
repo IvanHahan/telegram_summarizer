@@ -50,6 +50,11 @@ MESSAGES = {
         "cancelled_process": "Cancelled process",
         "logout_success": "You have been logged out.",
         "logout_not_logged_in": "You are not logged in.",
+        "code_sent_instructions": (
+            "Contact received! Telegram sent a code to {phone_number}. "
+            "To send it securely, add {obf} to the code (e.g., if the code is 12345, send {example}). "
+            "Enter the modified code within 2 minutes. Use /resend if it expires."
+        ),
     },
     "uk": {
         "start_authorized": "Ви вже авторизовані. Будь ласка, оберіть дію:",
@@ -96,13 +101,18 @@ MESSAGES = {
         "cancelled_process": "Процес скасовано.",
         "logout_success": "Ви успішно вийшли з системи.",
         "logout_not_logged_in": "Ви не увійшли в систему.",
+        "code_sent_instructions": (
+            "Контакт отримано! Telegram надіслав код на {phone_number}. "
+            "Щоб відправити його безпечно, додайте {obf} до коду (наприклад, якщо код 12345, надішліть {example}). "
+            "Введіть змінений код протягом 2 хвилин. Використайте /resend, якщо код протерміновано."
+        ),
     },
 }
 
 def get_locale(user_id: str) -> str:
     loc = store.get(f"lang:{user_id}")
-    return loc or "en"
+    return loc or "uk"
 
 def t(user_id: str, key: str) -> str:
     lang = get_locale(user_id)
-    return MESSAGES.get(lang, MESSAGES["en"]).get(key, key)
+    return MESSAGES.get(lang, MESSAGES["uk"]).get(key, key)

@@ -19,14 +19,13 @@ SHARE_CONTACT, ENTER_CODE, ENTER_PASSWORD = range(3)
 
 # Constants
 OBFUSCATION_CONSTANT = 1000
-SESSION_PREFIX = "session_"
 AUTH_ERROR_MSG = "No active authorization session. Please start with /authorize."
 
 
 async def authorize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the authorization process by requesting contact sharing."""
     user_id = update.effective_user.id
-    session_name = f"{SESSION_PREFIX}{user_id}"
+    session_name = user_id
     
     if await is_authorized(session_name):
         await update.message.reply_text(t(user_id, "start_authorized"))
@@ -59,7 +58,7 @@ async def receive_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         phone_number = f"+{phone_number}"
         
     # Store data in context
-    session_name = f"{SESSION_PREFIX}{user_id}"
+    session_name = user_id
     context.user_data['phone_number'] = phone_number
     context.user_data['session_name'] = session_name
 
@@ -73,10 +72,11 @@ async def receive_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if not await client.is_user_authorized():
             await client.send_code_request(phone_number)
             await update.message.reply_text(
-                f"Contact received! Telegram sent a code to {phone_number}. "
-                f"To send it securely, add {OBFUSCATION_CONSTANT} to the code "
-                f"(e.g., if the code is 12345, send {12345 + OBFUSCATION_CONSTANT}). "
-                "Enter the modified code within 2 minutes. Use /resend if it expires.",
+                t(user_id, "code_sent_instructions").format(
+                    phone_number=phone_number,
+                    obf=OBFUSCATION_CONSTANT,
+                    example=12345 + OBFUSCATION_CONSTANT
+                ),
                 reply_markup=ReplyKeyboardRemove()
             )
             return ENTER_CODE
@@ -110,6 +110,7 @@ async def receive_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     client = context.user_data['client']
     phone_number = context.user_data['phone_number']
+    user_id = update.effective_user.id
     
     try:
         # Process and decode the obfuscated code
@@ -159,6 +160,7 @@ async def receive_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     client = context.user_data['client']
     password = update.message.text.strip()
+    user_id = update.effective_user.id
 
     try:
         # Attempt sign-in with password
@@ -186,6 +188,7 @@ async def resend_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     # Get client and phone number from context
     client = context.user_data.get('client')
     phone_number = context.user_data.get('phone_number')
+    user_id = update.effective_user.id
     
     if not client or not phone_number:
         await update.message.reply_text(t(user_id, "auth_error_msg"))
@@ -218,6 +221,7 @@ async def resend_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the authorization process."""
     client = context.user_data.get('client')
+    user_id = update.effective_user.id
     if client:
         await client.disconnect()
     context.user_data.clear()
@@ -228,7 +232,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Log out the user."""
     user_id = update.effective_user.id
-    session_name = f"{SESSION_PREFIX}{user_id}"
+    session_name = user_id
     
     if await is_authorized(session_name):
         async with create_telegram_client(session_name) as client:
