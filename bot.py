@@ -61,10 +61,16 @@ ACTION_MARK_AS_READ = "Mark as Read"
 ACTION_HELP = "/help"
 
 
-def get_thread_id(context: ContextTypes.DEFAULT_TYPE) -> str:
+def get_thread_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     """Generate or retrieve a thread ID from context."""
     if 'thread_id' not in context.user_data:
-        context.user_data['thread_id'] = uuid.uuid4().hex
+        user_id = update.effective_user.id
+        if store.exists(f'thread_id:{str(user_id)}'):
+            context.user_data['thread_id'] = store.get(f'thread_id:{str(user_id)}')
+        else:
+            thread_id = uuid.uuid4().hex
+            store.set(f'thread_id:{str(user_id)}', thread_id, ex=3600)
+            context.user_data['thread_id'] = thread_id
     return context.user_data['thread_id']
 
 
@@ -136,7 +142,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
         workflow = await unread_history_workflow()
         res = await workflow.ainvoke(
-            {'user_id': user_id},
+            {'user_id': str(user_id)},
             config={'thread_id': get_thread_id(context)}
         )
         context.user_data['unread_chats'] = res.get('unread_chats')
@@ -151,7 +157,11 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text(res['messages'][-1].content)
 
     else:
-        await authorize(update, context)
+        user_id = update.effective_user.id
+        await update.message.reply_text(
+            t(user_id, "start_unauth"),
+            reply_markup=get_actions_keyboard()
+        )
 
 
 async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -161,7 +171,7 @@ async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         workflow = await mark_as_read_workflow()
         res = await workflow.ainvoke(
             {
-                'user_id': user_id,
+                'user_id':str(user_id),
                 'unread_chats': context.user_data.get('unread_chats')
             },
             config={'thread_id': get_thread_id(context)}
@@ -169,7 +179,12 @@ async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context.user_data.pop('unread_chats', None)
         await update.callback_query.edit_message_text(res['messages'][-1].content)
     else:
-        await authorize(update, context)
+        user_id = update.effective_user.id
+        # Inform user to start authorization
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            t(user_id, "start_unauth")
+        )
 
 
 # --- Analyze Conversation Handlers ---
@@ -177,7 +192,9 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start /analyze conversation by asking the user for a chat query."""
     user_id = update.effective_user.id
     if not await is_bot_authorized(update):
-        await authorize(update, context)
+        await update.message.reply_text(
+            t(user_id, "start_unauth")
+        )
         return ConversationHandler.END
 
     await update.message.reply_text(
@@ -244,7 +261,7 @@ async def analyze_selected_chat(update: Update, context: ContextTypes.DEFAULT_TY
 
     workflow = await analyze_chat_workflow()
     state = await workflow.ainvoke(
-        {'user_id': user_id, 'selected_chat': selected_chat},
+        {'user_id': str(user_id), 'selected_chat': selected_chat},
         config={'thread_id': get_thread_id(context)}
     )
     analysis_result = state['messages'][-1].content
@@ -261,13 +278,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     session_name = user_id
 
     if not await is_bot_authorized(update):
-        await authorize(update, context)
+        await update.message.reply_text(
+            t(user_id, "start_unauth")
+        )
         return
 
-    # Process the incoming mes  sage
+    # Process the incoming message
     workflow = await chat_workflow()
     state = await workflow.ainvoke(
-        {'user_id': session_name, 'messages': [update.message.text]},
+        {'user_id': str(session_name), 'messages': [update.message.text]},
         config={'thread_id': get_thread_id(context)}
     )
     response = state['messages'][-1].content
@@ -345,9 +364,9 @@ def main() -> None:
     application.add_handler(CommandHandler("summary", summary))
     application.add_handler(CommandHandler("logout", logout))
     application.add_handler(CallbackQueryHandler(mark_as_read, pattern="mark_as_read"))
-    application.add_handler(chat_handler)
-    application.add_handler(analyze_handler)
     application.add_handler(auth_handler)
+    application.add_handler(analyze_handler)
+    application.add_handler(chat_handler)
 
     # Add help handler
     application.add_handler(
