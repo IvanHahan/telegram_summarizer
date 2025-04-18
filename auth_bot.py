@@ -53,6 +53,12 @@ ENTER_CHAT_QUERY, SELECT_CHAT = range(2)
 
 OBFUSCATION_CONSTANT = 1000
 
+# Action Constants
+ACTION_SUMMARY = "Summary"
+ACTION_ANALYZE = "Analyze"
+ACTION_MARK_AS_READ = "Mark as Read"
+ACTION_HELP = "Help"
+
 
 def get_thread_id(context: ContextTypes.DEFAULT_TYPE) -> str:
     """Generate or retrieve a thread ID from context."""
@@ -68,13 +74,26 @@ async def is_bot_authorized(update: Update) -> bool:
     return await is_authorized(session_name)
 
 
+def get_actions_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Create and return a custom keyboard with common bot actions.
+    """
+    keyboard = [
+        [ACTION_SUMMARY, ACTION_ANALYZE],
+        [ACTION_MARK_AS_READ, ACTION_HELP]
+    ]
+    return ReplyKeyboardMarkup(keyboard, one_time_keyboard=False, resize_keyboard=True)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command."""
     if not await is_bot_authorized(update):
         await authorize(update, context)
     else:
+        actions_keyboard = get_actions_keyboard()
         await update.message.reply_text(
-            "You are already authorized. Use /summary to get your unread messages."
+            "You are already authorized. Please choose an action:",
+            reply_markup=actions_keyboard
         )
 
 
@@ -230,6 +249,35 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return SELECT_CHAT
 
+    # If no conversation state is active, you can always remind the user of available actions:
+    # actions_keyboard = get_actions_keyboard()
+    # await update.message.reply_text(
+    #     "Select an action:",
+    #     reply_markup=actions_keyboard
+    # )
+
+
+async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle custom actions sent by the user via the custom keyboard."""
+    action = update.message.text
+    if action == ACTION_SUMMARY:
+        await summary(update, context)
+    elif action == ACTION_ANALYZE:
+        await analyze(update, context)
+    elif action == ACTION_MARK_AS_READ:
+        # Mark-as-read can be triggered by reusing the workflow if available
+        await mark_as_read(update, context)
+    elif action == ACTION_HELP:
+        await update.message.reply_text(
+            "Available actions:\n"
+            "- Summary: Get unread messages summary\n"
+            "- Analyze: Analyze a specific chat\n"
+            "- Mark as Read: Mark chats as read\n"
+            "- Help: Display this help information"
+        )
+    else:
+        await update.message.reply_text("Unknown action. Please use the provided keyboard.")
+
 
 def main() -> None:
     """Run the Telegram bot."""
@@ -266,15 +314,17 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
+    # Add the custom action handler using a Regex filter matching the action constants 
+    action_pattern = f"^({ACTION_SUMMARY}|{ACTION_ANALYZE}|{ACTION_MARK_AS_READ}|{ACTION_HELP})$"
+    action_handler = MessageHandler(filters.Regex(action_pattern), handle_action)
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("summary", summary))
-    # application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_selection), group=SELECT_CHAT)
     application.add_handler(CallbackQueryHandler(mark_as_read, pattern="mark_as_read"))
     application.add_handler(auth_handler)
     application.add_handler(analyze_handler)
     application.add_handler(chat_handler)
-
-    # Then add the global message handler
+    application.add_handler(action_handler)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
