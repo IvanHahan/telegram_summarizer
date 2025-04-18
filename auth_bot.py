@@ -108,11 +108,12 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         context.user_data['unread_chats'] = res.get('unread_chats')
         await update.message.reply_text(res['messages'][-2].content)
-        keyboard = [
-            [InlineKeyboardButton("Mark as Read", callback_data="mark_as_read")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(res['messages'][-1].content, reply_markup=reply_markup)
+        if context.user_data['unread_chats']:
+            keyboard = [
+                [InlineKeyboardButton(ACTION_MARK_AS_READ, callback_data="mark_as_read")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(res['messages'][-1].content, reply_markup=reply_markup)
     else:
         await authorize(update, context)
 
@@ -323,9 +324,9 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(mark_as_read, pattern="mark_as_read"))
     application.add_handler(auth_handler)
     application.add_handler(analyze_handler)
-    application.add_handler(chat_handler)
     application.add_handler(action_handler)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    application.add_handler(chat_handler)
+    # application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
