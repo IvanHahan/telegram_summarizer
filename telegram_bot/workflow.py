@@ -26,19 +26,20 @@ from .utils import create_llm
 
 
 @tool
-def summarize_unread_chats_tool(formatted_chats: str):
+def summarize_unread_chats_tool():
     """
     Generate a summary of unread history.
-    Always call it when the user asks for unread history.
+    Always use it to summarize retrieved chat history for user.
+
     """
     pass
 
 
 @tool 
-def analyze_retrieved_chat_tool(formatted_chat: str):
+def analyze_retrieved_chat_tool():
     """
     Generate analysis of a retrieved chat.
-    Always call it when the user asks for chat analysis.
+    Always call it when the user asks for chat tone analysis.
     """
     pass
 
@@ -49,6 +50,7 @@ llm_with_tools = llm.bind_tools([
     search_chat_tool, 
     send_message_tool,
     mark_chats_as_read_tool,
+    summarize_unread_chats_tool
 ])
 
 # --- State Definition ---
@@ -85,10 +87,12 @@ async def unread_history_node(state: State) -> State:
     if not chats:
         chats = await get_unread_chats_tool.ainvoke({"user_id": state["user_id"]})
     state["unread_chats"] = chats
-    state["messages"].append(AIMessage('', 
-                                       tool_calls=[{"name": "get_unread_chats_tool", 
-                                                    "args": {"user_id": state["user_id"]},
-                                                    "id": "get_unread_chats_tool"}]))
+    tool_calls = [{"name": "get_unread_chats_tool",
+                   "args": {"user_id": state["user_id"]},
+                   "id": "get_unread_chats_tool",
+                   'type': 'tool_call'}]
+    state["messages"].append(AIMessage(content='',
+            tool_calls=tool_calls))
     state["messages"].append(
         ToolMessage(
             name="get_unread_chats_tool",
@@ -178,6 +182,7 @@ async def tool_node(state: State) -> State:
                 return state
             elif tool_name == "get_unread_chats_tool":
                 state["unread_chats"] = tool_result
+                tool_result = format_chats(tool_result)
             state["messages"].append(
                 ToolMessage(name=tool_name, content=tool_result, tool_call_id=tool_call["id"])
             )

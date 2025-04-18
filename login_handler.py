@@ -213,7 +213,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if client:
         await client.disconnect()
     context.user_data.clear()
-    await update.message.reply_text("Authorization cancelled.")
+    await update.message.reply_text("Cancelled process")
     return ConversationHandler.END
 
 

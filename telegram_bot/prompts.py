@@ -3,23 +3,12 @@ SYSTEM_MESSAGE = """
     You are a messenger assistant.
     Your task is to summarize unread history, analyze messages and provide some insights about them.
     You may be asked to provide summary, example replies, answer messages or analyze message history.
-    You must answer in Ukrainian language.
 """
 
 SUMMARIZE_PROMPT_TEMPLATE = """
-    Summarize messages in given chats in several sentences for every chat. Use the following format:
-    
-    Chats:
-    <Chat name 1>: <summary_for_chat>
-    <Chat name 2>: <summary_for_chat>
-
-    Channels:
-    <Channel_name_1>: summary_for_channel
-    <Channel_name_2>: summary_for_channel
-
-    Groups:
-    <Group_name_1>: summary_for_group
-    <Group_name_2>: summary_for_group
+    Summarize messages in given chats in several sentences for every chat.
+    Include the most important information and key points.
+    Use the following format:
     
     the chats are: {chats}
 """

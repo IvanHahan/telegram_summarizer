@@ -23,7 +23,7 @@ def format_chats(chats):
         chat_name = chat["chat_name"]
         messages = chat["messages"]
         formatted_messages = [
-            f"{msg['sender_name']}: {msg['text']}" if 'sender_name' in msg else msg['text'] for msg in messages
+            f"{msg['sender_name']}: {msg['text']}" if 'sender_name' in msg else msg['text'] for msg in messages if msg['text']
         ]
         title = 'Chat'
         if chat["is_channel"]:

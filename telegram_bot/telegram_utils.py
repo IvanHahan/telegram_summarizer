@@ -10,13 +10,17 @@ load_dotenv()
 api_id = os.getenv("TELEGRAM_API_ID")
 api_hash = os.getenv("TELEGRAM_API_HASH")
 
-async def get_unread_chats(client, 
-                     include_private=True, 
-                     include_groups=False, 
-                     include_channels=False, 
-                     include_muted=False, 
-                     max_unread_count=100,
-                     max_days=3):
+async def get_unread_chats(
+    client, 
+    include_private=True, 
+    include_groups=False, 
+    include_channels=False, 
+    include_muted=False, 
+    max_unread_count=20,
+    max_days=3,
+    max_chats: int = 10,
+    max_words: int = 10000
+):
     """
     Extract unread messages from private chats, group chats, and/or channels based on the provided flags.
     
@@ -26,15 +30,22 @@ async def get_unread_chats(client,
         include_groups (bool): Whether to include group chats in the results.
         include_channels (bool): Whether to include channels in the results.
         include_muted (bool): Whether to include muted chats and channels in the results.
-        max_unread_count (int, optional): Maximum number of unread messages to extract per chat. If None, all unread messages are extracted.
+        max_unread_count (int, optional): Maximum number of unread messages to extract per chat.
+        max_days (int): Maximum number of days to look back for messages.
+        max_chats (int, optional): Maximum number of chats to return. If None, return all matching chats.
+        max_words (int, optional): Maximum total number of words across all extracted messages.
     
     Returns:
         list: A list of dictionaries containing chat names, unread message counts, and unread messages.
     """
     unread_chats = []
     dialogs = await client.get_dialogs()
+    total_words = 0  # Global counter for words among all messages
 
     for dialog in dialogs:
+        if max_chats is not None and len(unread_chats) >= max_chats:
+            break
+
         if dialog.unread_count > 0:  # Check if the chat has unread messages
             # Check if the chat is muted
             is_muted = dialog.dialog.notify_settings and dialog.dialog.notify_settings.mute_until
@@ -48,18 +59,37 @@ async def get_unread_chats(client,
                 unread_messages = []
                 limit_messages = min(max_unread_count, dialog.unread_count)
                 async for message in client.iter_messages(dialog.id, limit=limit_messages):
-                    if (datetime.now(timezone.utc) - message.date).days > max_days:  # Skip messages older than a week
+                    # Stop processing if message is too old
+                    if (datetime.now(timezone.utc) - message.date).days > max_days:
                         continue
+                    
+                    if not message.text:
+                        continue
+
+                    # Count words in the message
+                    words_in_message = len(message.text.split())
+                    # If max_words is set and adding this message would exceed the limit, break out
+                    if max_words is not None and (total_words + words_in_message) > max_words:
+                        # Optionally, you could trim the message text to include only remaining allowed words:
+                        # remaining = max_words - total_words
+                        # trimmed_text = " ".join(message.text.split()[:remaining])
+                        # unread_messages.append({ "text": trimmed_text, ... })
+                        break  # Stop processing further messages in this dialog
+                    
+                    total_words += words_in_message
                     
                     sender_name = None
                     if message.sender and hasattr(message.sender, 'first_name'):
                         sender_name = message.sender.first_name or message.sender.last_name or message.sender.username
-                    unread_messages.append({
+                    entry = {
                         "text": message.text,
                         "sender_id": message.sender_id,
-                    })
+                    }
                     if sender_name:
-                        unread_messages[-1]["sender_name"] = sender_name
+                        entry["sender_name"] = sender_name
+                    unread_messages.append(entry)
+                
+                # If any messages were collected, add chat info
                 if unread_messages:
                     unread_chats.append({
                         "chat_name": dialog.name,
@@ -69,6 +99,11 @@ async def get_unread_chats(client,
                         "is_channel": dialog.is_channel,
                         "is_group": dialog.is_group,
                     })
+                    
+                # If we've reached the overall word limit, break out of processing further dialogs.
+                if max_words is not None and total_words >= max_words:
+                    break
+
     return unread_chats
 
 async def get_chat_history(client, chat_id, hours=10):
@@ -86,7 +121,7 @@ async def get_chat_history(client, chat_id, hours=10):
     messages = []
     async for message in client.iter_messages(chat_id):
         if (datetime.now(timezone.utc) - message.date).seconds > (hours * 3600):
-            break
+            break 
         sender_name = None
         if message.sender and hasattr(message.sender, 'first_name'):
             sender_name = message.sender.first_name or message.sender.last_name or message.sender.username
