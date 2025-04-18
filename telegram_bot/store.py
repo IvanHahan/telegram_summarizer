@@ -1,5 +1,6 @@
 import json
 
+import redis as sync_redis  # sync Redis client
 import redis.asyncio as aioredis
 
 
@@ -73,6 +74,63 @@ class AsyncRedisStore:
         return self.redis_client.incr(key, amount)
 
 
+class RedisStore:
+    def __init__(self, host='localhost', port=6379, db=0):
+        """
+        Initialize the synchronous RedisStore with connection parameters.
+        :param host: Redis server hostname or IP address.
+        :param port: Redis server port.
+        :param db: Redis database index.
+        """
+        self.redis_client = sync_redis.Redis(host=host, port=port, db=db, decode_responses=True)
+
+    def set(self, key, value, expire=1800):
+        """
+        Set a key-value pair in Redis with an optional expiration time.
+        :param key: The key to set.
+        :param value: The value to set.
+        :param expire: Expiration time in seconds (optional).
+        """
+        self.redis_client.set(key, value, ex=expire)
+
+    def set_object(self, key, value, expire=1800):
+        """
+        Set a JSON-serializable object in Redis.
+        """
+        self.redis_client.set(key, json.dumps(value), ex=expire)
+
+    def get(self, key):
+        """
+        Get the value of a key from Redis.
+        """
+        return self.redis_client.get(key)
+
+    def get_object(self, key):
+        """
+        Get a JSON-parsed object from Redis.
+        """
+        value = self.redis_client.get(key)
+        return json.loads(value) if value else None
+
+    def delete(self, key):
+        """
+        Delete a key from Redis.
+        """
+        self.redis_client.delete(key)
+
+    def exists(self, key):
+        """
+        Check if a key exists in Redis.
+        """
+        return self.redis_client.exists(key) > 0
+
+    def increment(self, key, amount=1):
+        """
+        Increment the value of a key by a specified amount.
+        """
+        return self.redis_client.incr(key, amount)
+
+
 class RAMStore:
     def __init__(self):
         """
@@ -137,7 +195,20 @@ def create_store(store_type='ram', **kwargs):
     """
     if store_type == 'ram':
         return RAMStore()
+    elif store_type == 'redis':
+        return RedisStore(**kwargs)
     elif store_type == 'async_redis':
         return AsyncRedisStore(**kwargs)
     else:
         raise ValueError(f"Unsupported store_type: {store_type}")
+    
+
+_store_instance = None
+
+def get_store():
+    global _store_instance
+    if _store_instance is None:
+        _store_instance = create_store(store_type='redis', host='localhost', port=6379, db=0)
+    return _store_instance
+
+store = get_store()

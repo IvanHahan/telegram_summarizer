@@ -9,6 +9,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import Literal, TypedDict
 
+from telegram_bot.localization import t
+
 from .prompts import (
     ANALYZE_CHAT_PROMPT_TEMPLATE,
     SUMMARIZE_PROMPT_TEMPLATE,
@@ -82,7 +84,8 @@ def route_user_request(state: State) -> str:
 
 # --- Node Functions ---
 async def unread_history_node(state: State) -> State:
-    state["messages"].append(HumanMessage("What I missed?"))
+    user_id = state["user_id"]
+    state["messages"].append(HumanMessage(t(user_id, "prompt_unread_question")))
     chats = state.get("unread_chats")
     if not chats:
         chats = await get_unread_chats_tool.ainvoke({"user_id": state["user_id"]})
@@ -101,7 +104,7 @@ async def unread_history_node(state: State) -> State:
         )
     )
     if not chats:
-        state["messages"].append(AIMessage("No unread chats found."))
+        state["messages"].append(AIMessage(t(user_id, "no_unread_chats_found")))
         return state
     
     summarization_prompt = PromptTemplate(
@@ -110,14 +113,15 @@ async def unread_history_node(state: State) -> State:
     ).partial(optional_instruction="")
     response = (summarization_prompt | llm).invoke(input={"chats": format_chats(chats)})
     state["messages"].append(response)
-    state["messages"].append(AIMessage("Would you like to mark messages as read?"))
+    state["messages"].append(AIMessage(t(user_id, "ask_mark_read")))
     return state
 
 async def analyze_chat_node(state: State) -> State:
-    state["messages"].append(HumanMessage("Analyze given chat"))
+    user_id = state["user_id"]
+    state["messages"].append(HumanMessage(t(user_id, "analyze_given_chat")))
     chat = state.get("selected_chat")
     if not chat:
-        return {"messages": [AIMessage("No chat selected for analysis.")]}
+        return {"messages": [AIMessage(t(user_id, "no_chat_selected"))]}
     summarization_prompt = PromptTemplate(
         input_variables=["chat"],
         template=ANALYZE_CHAT_PROMPT_TEMPLATE,
@@ -127,7 +131,8 @@ async def analyze_chat_node(state: State) -> State:
     return state
 
 async def mark_as_read_node(state: State) -> State:
-    state["messages"].append(HumanMessage("Mark unread as read"))
+    user_id = state["user_id"]
+    state["messages"].append(HumanMessage(t(user_id, "mark_unread_as_read")))
     unread_chats = state.get("unread_chats")
     if not unread_chats:
         unread_chats = await get_unread_chats_tool.ainvoke({"user_id": state["user_id"]})
@@ -135,15 +140,16 @@ async def mark_as_read_node(state: State) -> State:
         {"user_id": state["user_id"], "chat_ids": [c["chat_id"] for c in unread_chats]}
     )
     state["unread_chats"] = []
-    state["messages"].append(AIMessage("Done!"))
+    state["messages"].append(AIMessage(t(user_id, "done")))
     return state
 
 async def select_chat_node(state: State) -> State:
+    user_id = state["user_id"]
     chat = state.get("selected_chat", {})
-    state["messages"].append(
-        HumanMessage(f"Selected with ID: {chat.get('chad_id')} and name: {chat.get('chad_name')}")
-    )
-    state["messages"].append(AIMessage("Understood!"))
+    template = t(user_id, "selected_chat_info")
+    msg = template.format(id=chat.get("chat_id"), name=chat.get("chat_name"))
+    state["messages"].append(HumanMessage(msg))
+    state["messages"].append(AIMessage(t(user_id, "understood")))
     return state
 
 async def clear_state_node(state: State) -> State:

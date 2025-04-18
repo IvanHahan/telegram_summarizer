@@ -9,6 +9,7 @@ from telethon.errors import (
     SessionPasswordNeededError,
 )
 
+from telegram_bot.localization import t
 from telegram_bot.telegram_utils import create_telegram_client, is_authorized
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ async def authorize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     session_name = f"{SESSION_PREFIX}{user_id}"
     
     if await is_authorized(session_name):
-        await update.message.reply_text("You are already authorized!")
+        await update.message.reply_text(t(user_id, "start_authorized"))
         return ConversationHandler.END
         
     contact_button = KeyboardButton("Share Contact", request_contact=True)
@@ -37,7 +38,7 @@ async def authorize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
     
     await update.message.reply_text(
-        "Please share your contact to authorize. This will provide your phone number securely.",
+        t(user_id, "ask_contact"),
         reply_markup=reply_markup
     )
     return SHARE_CONTACT
@@ -49,7 +50,7 @@ async def receive_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     contact = update.message.contact
     
     if not contact:
-        await update.message.reply_text("No contact received. Please try /authorize again.")
+        await update.message.reply_text(t(user_id, "no_contact_received"))
         return ConversationHandler.END
 
     # Process phone number
@@ -80,21 +81,23 @@ async def receive_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             return ENTER_CODE
         else:
-            await update.message.reply_text("Already authorized!")
+            await update.message.reply_text(t(user_id, "start_authorized"))
             await _clean_up_client(client)
             return ConversationHandler.END
             
     except PhoneNumberInvalidError:
-        await update.message.reply_text("Invalid phone number. Please try /authorize again.")
+        await update.message.reply_text(t(user_id, "invalid_phone_number"))
         return ConversationHandler.END
     except FloodWaitError as e:
         await update.message.reply_text(
-            f"Too many attempts. Please wait {e.seconds} seconds and try /authorize again."
+            t(user_id, "too_many_attempts_wait").format(seconds=e.seconds)
         )
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Authorization initiation error: {e}")
-        await update.message.reply_text(f"Error: {e}")
+        await update.message.reply_text(
+            t(user_id, "authorization_error").format(error=e)
+        )
         return ConversationHandler.END
 
 
@@ -116,33 +119,33 @@ async def receive_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             real_code = str(obfuscated_code - OBFUSCATION_CONSTANT)
         except ValueError:
             await update.message.reply_text(
-                f"Please send a numeric code. Add {OBFUSCATION_CONSTANT} to the Telegram code and try again."
+                t(user_id, "numeric_code_prompt").format(obf=OBFUSCATION_CONSTANT)
             )
             return ENTER_CODE
 
         # Attempt sign-in with the decoded code
         await client.sign_in(phone_number, real_code)
-        await update.message.reply_text("Authorization successful!")
+        await update.message.reply_text(t(user_id, "auth_successful"))
         await _clean_up_session(client, context)
         return ConversationHandler.END
         
     except PhoneCodeExpiredError:
-        await update.message.reply_text(
-            "The code has expired. Use /resend to get a new code or /cancel to stop."
-        )
+        await update.message.reply_text(t(user_id, "code_expired"))
         return ENTER_CODE
     except SessionPasswordNeededError:
-        await update.message.reply_text("Two-factor authentication enabled. Please enter your password:")
+        await update.message.reply_text(t(user_id, "enter_2fa_password"))
         return ENTER_PASSWORD
     except FloodWaitError as e:
-        await update.message.reply_text(f"Too many attempts. Please wait {e.seconds} seconds and try again.")
+        await update.message.reply_text(
+            t(user_id, "too_many_attempts_wait").format(seconds=e.seconds)
+        )
         await _clean_up_session(client, context)
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Code sign-in error: {e}")
         await update.message.reply_text(
-            f"Invalid code or error: {e}. Ensure you added {OBFUSCATION_CONSTANT} "
-            "to the Telegram code. Use /resend for a new code or /cancel to stop."
+            t(user_id, "invalid_code_or_error")
+                .format(obf=OBFUSCATION_CONSTANT, error=e)
         )
         return ENTER_CODE
 
@@ -160,18 +163,20 @@ async def receive_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         # Attempt sign-in with password
         await client.sign_in(password=password)
-        await update.message.reply_text("Authorization successful with 2FA!")
+        await update.message.reply_text(t(user_id, "auth_successful_2fa"))
         await _clean_up_session(client, context)
         return ConversationHandler.END
         
     except FloodWaitError as e:
-        await update.message.reply_text(f"Too many attempts. Please wait {e.seconds} seconds and try again.")
+        await update.message.reply_text(
+            t(user_id, "too_many_attempts_wait").format(seconds=e.seconds)
+        )
         await _clean_up_session(client, context)
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Password sign-in error: {e}")
         await update.message.reply_text(
-            f"Invalid password or error: {e}. Please try again or use /cancel to stop."
+            t(user_id, "invalid_password_or_error").format(error=e)
         )
         return ENTER_PASSWORD
 
@@ -183,26 +188,29 @@ async def resend_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     phone_number = context.user_data.get('phone_number')
     
     if not client or not phone_number:
-        await update.message.reply_text(AUTH_ERROR_MSG)
+        await update.message.reply_text(t(user_id, "auth_error_msg"))
         return ConversationHandler.END
     
     try:
         # Request new code
         await client.send_code_request(phone_number, force_sms=False)
         await update.message.reply_text(
-            f"A new code was sent to {phone_number}. "
-            f"Add {OBFUSCATION_CONSTANT} to it (e.g., 12345 becomes {12345 + OBFUSCATION_CONSTANT}) "
-            "and enter the modified code within 2 minutes."
+            t(user_id, "code_resent_info")
+                .format(phone_number=phone_number, obf=OBFUSCATION_CONSTANT)
         )
         return ENTER_CODE
         
     except FloodWaitError as e:
-        await update.message.reply_text(f"Too many attempts. Please wait {e.seconds} seconds and try again.")
+        await update.message.reply_text(
+            t(user_id, "too_many_attempts_wait").format(seconds=e.seconds)
+        )
         await _clean_up_session(client, context)
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Resend code error: {e}")
-        await update.message.reply_text(f"Error resending code: {e}. Try /authorize again.")
+        await update.message.reply_text(
+            t(user_id, "resend_code_error").format(error=e)
+        )
         await _clean_up_session(client, context)
         return ConversationHandler.END
 
@@ -213,7 +221,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if client:
         await client.disconnect()
     context.user_data.clear()
-    await update.message.reply_text("Cancelled process")
+    await update.message.reply_text(t(user_id, "cancelled_process"))
     return ConversationHandler.END
 
 
@@ -225,9 +233,9 @@ async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if await is_authorized(session_name):
         async with create_telegram_client(session_name) as client:
             await client.log_out()
-        await update.message.reply_text("You have been logged out.")
+        await update.message.reply_text(t(user_id, "logout_success"))
     else:
-        await update.message.reply_text("You are not logged in.")
+        await update.message.reply_text(t(user_id, "logout_not_logged_in"))
     
     return ConversationHandler.END
 

@@ -22,12 +22,14 @@ from telegram.ext import (
 from login_handler import (
     authorize,
     cancel,
+    logout,
     receive_code,
     receive_contact,
     receive_password,
     resend_code,
 )
-from telegram_bot.store import create_store
+from telegram_bot.localization import LANGUAGES, t
+from telegram_bot.store import store
 from telegram_bot.telegram_utils import (
     create_telegram_client,
     get_chat_history,
@@ -45,7 +47,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-store = create_store('async_redis')
 
 # Conversation state constants
 SHARE_CONTACT, ENTER_CODE, ENTER_PASSWORD = range(3)
@@ -85,15 +86,48 @@ def get_actions_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard, one_time_keyboard=False, resize_keyboard=True)
 
 
+async def language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ask user to choose language."""
+    user_id = update.effective_user.id
+    buttons = [
+        [InlineKeyboardButton(name, callback_data=f"lang_{code}")]
+        for code, name in LANGUAGES.items()
+    ]
+    markup = InlineKeyboardMarkup(buttons)
+    await update.message.reply_text(t(user_id, "choose_language"), reply_markup=markup)
+
+
+async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle language selection."""
+    data = update.callback_query.data  # e.g. "lang_en" or "lang_uk"
+    _, code = data.split("_", 1)
+    user_id = update.effective_user.id
+
+    # persist in Redis
+    store.set(f"lang:{user_id}", code)
+
+    # update in-memory context
+    context.user_data["lang"] = code
+
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text(t(user_id, "lang_changed"))
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command."""
+    user_id = update.effective_user.id
+
+    # load persisted language if any
+    saved_lang = store.get(f"lang:{user_id}")
+    if saved_lang:
+        context.user_data["lang"] = saved_lang
+
     if not await is_bot_authorized(update):
         await authorize(update, context)
     else:
-        actions_keyboard = get_actions_keyboard()
         await update.message.reply_text(
-            "You are already authorized. Please choose an action:",
-            reply_markup=actions_keyboard
+            t(user_id, "start_authorized"),
+            reply_markup=get_actions_keyboard()
         )
 
 
@@ -142,12 +176,13 @@ async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 # --- Analyze Conversation Handlers ---
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start /analyze conversation by asking the user for a chat query."""
+    user_id = update.effective_user.id
     if not await is_bot_authorized(update):
         await authorize(update, context)
         return ConversationHandler.END
 
     await update.message.reply_text(
-        "Please enter the name or ID of the chat you want to analyze:",
+        t(user_id, "ask_chat_query"),
         reply_markup=ReplyKeyboardRemove(),
     )
     return ENTER_CHAT_QUERY
@@ -170,16 +205,14 @@ async def handle_chat_query(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return await analyze_selected_chat(update, context, results)
 
     if not results:
-        await update.message.reply_text(
-            "No chats found matching your query. Please try again or /cancel to stop."
-        )
+        await update.message.reply_text(t(user_id, "no_chats_found"))
         return ENTER_CHAT_QUERY
 
     context.user_data['chat_results'] = results
     keyboard = [[chat['chat_name']] for chat in results]
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text(
-        "I found the following chats. Please select one:",
+        t(user_id, "select_chat"),
         reply_markup=reply_markup,
     )
     return SELECT_CHAT
@@ -304,14 +337,23 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    # Add the custom action handler using a Regex filter matching the action constants 
+    # Add language handlers
+    application.add_handler(CommandHandler("language", language))
+    application.add_handler(CallbackQueryHandler(language_callback, pattern=r"^lang_"))
 
+    # Add other handlers (start, summary, analyze, etc.)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("summary", summary))
+    application.add_handler(CommandHandler("logout", logout))
     application.add_handler(CallbackQueryHandler(mark_as_read, pattern="mark_as_read"))
     application.add_handler(auth_handler)
     application.add_handler(analyze_handler)
     application.add_handler(chat_handler)
+
+    # Add help handler
+    application.add_handler(
+        CommandHandler("help", lambda u, c: c.bot.send_message(u.effective_chat.id, t(u.effective_user.id, "help_text")))
+    )
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
