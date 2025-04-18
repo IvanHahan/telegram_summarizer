@@ -85,6 +85,10 @@ async def unread_history_node(state: State) -> State:
     if not chats:
         chats = await get_unread_chats_tool.ainvoke({"user_id": state["user_id"]})
     state["unread_chats"] = chats
+    state["messages"].append(AIMessage('', 
+                                       tool_calls=[{"name": "get_unread_chats_tool", 
+                                                    "args": {"user_id": state["user_id"]},
+                                                    "id": "get_unread_chats_tool"}]))
     state["messages"].append(
         ToolMessage(
             name="get_unread_chats_tool",
@@ -92,6 +96,10 @@ async def unread_history_node(state: State) -> State:
             tool_call_id="get_unread_chats_tool",
         )
     )
+    if not chats:
+        state["messages"].append(AIMessage("No unread chats found."))
+        return state
+    
     summarization_prompt = PromptTemplate(
         input_variables=["chats", "optional_instruction"],
         template=SUMMARIZE_PROMPT_TEMPLATE,

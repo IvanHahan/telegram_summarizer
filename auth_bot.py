@@ -54,10 +54,10 @@ ENTER_CHAT_QUERY, SELECT_CHAT = range(2)
 OBFUSCATION_CONSTANT = 1000
 
 # Action Constants
-ACTION_SUMMARY = "Summary"
-ACTION_ANALYZE = "Analyze"
+ACTION_SUMMARY = "/summary"
+ACTION_ANALYZE = "/analyze"
 ACTION_MARK_AS_READ = "Mark as Read"
-ACTION_HELP = "Help"
+ACTION_HELP = "/help"
 
 
 def get_thread_id(context: ContextTypes.DEFAULT_TYPE) -> str:
@@ -80,7 +80,7 @@ def get_actions_keyboard() -> ReplyKeyboardMarkup:
     """
     keyboard = [
         [ACTION_SUMMARY, ACTION_ANALYZE],
-        [ACTION_MARK_AS_READ, ACTION_HELP]
+        [ACTION_HELP]
     ]
     return ReplyKeyboardMarkup(keyboard, one_time_keyboard=False, resize_keyboard=True)
 
@@ -107,13 +107,16 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             config={'thread_id': get_thread_id(context)}
         )
         context.user_data['unread_chats'] = res.get('unread_chats')
-        await update.message.reply_text(res['messages'][-2].content)
         if context.user_data['unread_chats']:
+            await update.message.reply_text(res['messages'][-2].content)
             keyboard = [
                 [InlineKeyboardButton(ACTION_MARK_AS_READ, callback_data="mark_as_read")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await update.message.reply_text(res['messages'][-1].content, reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(res['messages'][-1].content)
+
     else:
         await authorize(update, context)
 
@@ -229,7 +232,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await authorize(update, context)
         return
 
-    # Process the incoming message
+    # Process the incoming mes  sage
     workflow = await chat_workflow()
     state = await workflow.ainvoke(
         {'user_id': session_name, 'messages': [update.message.text]},
@@ -249,35 +252,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             reply_markup=reply_markup,
         )
         return SELECT_CHAT
-
-    # If no conversation state is active, you can always remind the user of available actions:
-    # actions_keyboard = get_actions_keyboard()
-    # await update.message.reply_text(
-    #     "Select an action:",
-    #     reply_markup=actions_keyboard
-    # )
-
-
-async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle custom actions sent by the user via the custom keyboard."""
-    action = update.message.text
-    if action == ACTION_SUMMARY:
-        await summary(update, context)
-    elif action == ACTION_ANALYZE:
-        await analyze(update, context)
-    elif action == ACTION_MARK_AS_READ:
-        # Mark-as-read can be triggered by reusing the workflow if available
-        await mark_as_read(update, context)
-    elif action == ACTION_HELP:
-        await update.message.reply_text(
-            "Available actions:\n"
-            "- Summary: Get unread messages summary\n"
-            "- Analyze: Analyze a specific chat\n"
-            "- Mark as Read: Mark chats as read\n"
-            "- Help: Display this help information"
-        )
-    else:
-        await update.message.reply_text("Unknown action. Please use the provided keyboard.")
 
 
 def main() -> None:
@@ -316,17 +290,13 @@ def main() -> None:
     )
 
     # Add the custom action handler using a Regex filter matching the action constants 
-    action_pattern = f"^({ACTION_SUMMARY}|{ACTION_ANALYZE}|{ACTION_MARK_AS_READ}|{ACTION_HELP})$"
-    action_handler = MessageHandler(filters.Regex(action_pattern), handle_action)
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("summary", summary))
     application.add_handler(CallbackQueryHandler(mark_as_read, pattern="mark_as_read"))
     application.add_handler(auth_handler)
     application.add_handler(analyze_handler)
-    application.add_handler(action_handler)
     application.add_handler(chat_handler)
-    # application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
