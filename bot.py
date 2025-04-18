@@ -1,244 +1,320 @@
-#!/usr/bin/env python
-# pylint: disable=unused-argument
-# This program is dedicated to the public domain under the CC0 license.
-
-"""This example showcases how PTBs "arbitrary callback data" feature can be used.
-
-For detailed info on arbitrary callback data, see the wiki page at
-https://github.com/python-telegram-bot/python-telegram-bot/wiki/Arbitrary-callback_data
-
-Note:
-To use arbitrary callback data, you must install PTB via
-`pip install "python-telegram-bot[callback-data]"`
-"""
 import logging
 import os
 import uuid
 
-from langchain_core.messages import AIMessage, HumanMessage
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    Update,
+)
 from telegram.ext import (
-    Application,
+    ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    ConversationHandler,
     MessageHandler,
-    PicklePersistence,
     filters,
 )
-from telethon.errors import PhoneCodeExpiredError
 
-from telegram_bot.bot_utils import authorization_handler, bot_handler
+from login_handler import (
+    authorize,
+    cancel,
+    receive_code,
+    receive_contact,
+    receive_password,
+    resend_code,
+)
 from telegram_bot.store import create_store
-from telegram_bot.telegram_utils import create_telegram_client, is_authorized
+from telegram_bot.telegram_utils import (
+    create_telegram_client,
+    get_chat_history,
+    is_authorized,
+    search_chat,
+)
+from telegram_bot.workflow import (
+    analyze_chat_workflow,
+    chat_workflow,
+    mark_as_read_workflow,
+    unread_history_workflow,
+)
 
-# Enable logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
-# set higher logging level for httpx to avoid all GET and POST requests being logged
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
 logger = logging.getLogger(__name__)
-
 store = create_store('async_redis')
 
+# Conversation state constants
+SHARE_CONTACT, ENTER_CODE, ENTER_PASSWORD = range(3)
+ENTER_CHAT_QUERY, SELECT_CHAT = range(2)
 
-async def get_thread_id(user_id):
-    thread_id = await store.get(f"thread_id:{user_id}")
-    if thread_id is None:
-        thread_id = uuid.uuid4().hex
-    await store.set(f"thread_id:{user_id}", thread_id, expire=1800)
-    return thread_id
+OBFUSCATION_CONSTANT = 1000
 
-async def set_thread_id(user_id, thread_id):
-    await store.set(f"thread_id:{user_id}", thread_id, expire=1800)
-
-async def reset_thread_id(user_id):
-    await store.delete(f"thread_id:{user_id}")
-
-async def set_expire_for_user(user_id):
-    thread_id = await get_thread_id(user_id)
-    keys = await store.redis_client.keys(f"checkpoint${thread_id}*")
-    for key in keys:
-        await store.redis_client.setex(key, 1800)
-
-async def clear_for_user(user_id):
-    await store.delete(f"auth:{user_id}")
-    thread_id = await get_thread_id(user_id)
-    keys = await store.redis_client.keys(f"checkpoint${thread_id}*")
-    for key in keys:
-        await store.delete(key)
+# Action Constants
+ACTION_SUMMARY = "/summary"
+ACTION_ANALYZE = "/analyze"
+ACTION_MARK_AS_READ = "Mark as Read"
+ACTION_HELP = "/help"
 
 
-async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    contact = update.message.contact
-    if contact is not None:
-        phone = contact.phone_number
-        user_id = contact.user_id
-        await update.message.reply_text(f"Thanks! Your number is {phone}")
-        if not await is_authorized(user_id):
-            client = create_telegram_client(user_id)
-            await client.connect()
-            res = await client.send_code_request(phone)
-            await store.set_object(f"auth:{user_id}", {'phone': phone, 'phone_code_hash': res.phone_code_hash})
-            await update.message.reply_text("Please enter the code sent to your phone:")
+def get_thread_id(context: ContextTypes.DEFAULT_TYPE) -> str:
+    """Generate or retrieve a thread ID from context."""
+    if 'thread_id' not in context.user_data:
+        context.user_data['thread_id'] = uuid.uuid4().hex
+    return context.user_data['thread_id']
 
-async def handle_code(update: Update, auth: dict):
-    code = update.message.text
+
+async def is_bot_authorized(update: Update) -> bool:
+    """Check if the current user is authorized."""
     user_id = update.effective_user.id
-    client = create_telegram_client(user_id)
-    await client.connect()
-    try:
-        auth['code'] = code
-        await client.sign_in(**auth)
-        await store.delete(f"auth:{user_id}")
-        await update.message.reply_text("You are now authorized!")
-    except PhoneCodeExpiredError:
-        await update.message.reply_text("The code has expired. Please try again.")
-        await clear_for_user(user_id)
-    except Exception as e:
-        logger.error(f"Error during sign-in: {str(e)}")
-        await update.message.reply_text("Failed to authorize. Please try again.")
+    session_name = f"session_{user_id}"
+    return await is_authorized(session_name)
 
 
-async def what_i_missed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the 'What I Missed' request."""
+def get_actions_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Create and return a custom keyboard with common bot actions.
+    """
+    keyboard = [
+        [ACTION_SUMMARY, ACTION_ANALYZE],
+        [ACTION_HELP]
+    ]
+    return ReplyKeyboardMarkup(keyboard, one_time_keyboard=False, resize_keyboard=True)
 
-    await bot_handler(update, action='missed')
-
-async def analyze_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the 'What I Missed' request."""
-
-    await bot_handler(update, action='analyze', session_id=get_thread_id(update.effective_user.id))
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the /start command.""" 
-    if not authorization_handler(update):
+    """Handle /start command."""
+    if not await is_bot_authorized(update):
+        await authorize(update, context)
+    else:
+        actions_keyboard = get_actions_keyboard()
+        await update.message.reply_text(
+            "You are already authorized. Please choose an action:",
+            reply_markup=actions_keyboard
+        )
+
+
+async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Fetch and display unread messages; offer marking them as read."""
+    if await is_bot_authorized(update):
+        user_id = update.effective_user.id
+        workflow = await unread_history_workflow()
+        res = await workflow.ainvoke(
+            {'user_id': f"session_{user_id}"},
+            config={'thread_id': get_thread_id(context)}
+        )
+        context.user_data['unread_chats'] = res.get('unread_chats')
+        if context.user_data['unread_chats']:
+            await update.message.reply_text(res['messages'][-2].content)
+            keyboard = [
+                [InlineKeyboardButton(ACTION_MARK_AS_READ, callback_data="mark_as_read")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(res['messages'][-1].content, reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(res['messages'][-1].content)
+
+    else:
+        await authorize(update, context)
+
+
+async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle mark-as-read action via callback query."""
+    if await is_bot_authorized(update):
+        user_id = update.effective_user.id
+        workflow = await mark_as_read_workflow()
+        res = await workflow.ainvoke(
+            {
+                'user_id': f"session_{user_id}",
+                'unread_chats': context.user_data.get('unread_chats')
+            },
+            config={'thread_id': get_thread_id(context)}
+        )
+        context.user_data.pop('unread_chats', None)
+        await update.callback_query.edit_message_text(res['messages'][-1].content)
+    else:
+        await authorize(update, context)
+
+
+# --- Analyze Conversation Handlers ---
+async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start /analyze conversation by asking the user for a chat query."""
+    if not await is_bot_authorized(update):
+        await authorize(update, context)
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "Please enter the name or ID of the chat you want to analyze:",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return ENTER_CHAT_QUERY
+
+
+async def handle_chat_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Handle chat query by searching for chats matching the entry.
+    If the result is a single chat (dict), perform analysis immediately.
+    Otherwise, prompt user to select a chat from a list.
+    """
+    query = update.message.text
+    user_id = update.effective_user.id
+
+    async with create_telegram_client(f"session_{user_id}") as client:
+        results = await search_chat(client, query, top_k=5)
+
+    # If the result is a single chat, analyze immediately
+    if isinstance(results, dict):
+        return await analyze_selected_chat(update, context, results)
+
+    if not results:
+        await update.message.reply_text(
+            "No chats found matching your query. Please try again or /cancel to stop."
+        )
+        return ENTER_CHAT_QUERY
+
+    context.user_data['chat_results'] = results
+    keyboard = [[chat['chat_name']] for chat in results]
+    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text(
+        "I found the following chats. Please select one:",
+        reply_markup=reply_markup,
+    )
+    return SELECT_CHAT
+
+
+async def handle_chat_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle user's chat selection and analyze the selected chat."""
+    selected_chat_title = update.message.text
+    chat_results = context.user_data.get('chat_results', [])
+    selected_chat = next((chat for chat in chat_results if chat['chat_name'] == selected_chat_title), None)
+
+    if not selected_chat:
+        await update.message.reply_text(
+            "Invalid selection. Please select a chat from the list or /cancel to stop."
+        )
+        return SELECT_CHAT
+
+    return await analyze_selected_chat(update, context, selected_chat)
+
+
+async def analyze_selected_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, selected_chat: dict) -> int:
+    """Perform chat analysis for the given chat and reply with the analysis result."""
+    user_id = update.effective_user.id
+    chat_id = selected_chat['chat_id']
+    chat_name = selected_chat['chat_name']
+
+    async with create_telegram_client(f"session_{user_id}") as client:
+        messages = await get_chat_history(client, chat_id)
+        selected_chat['messages'] = messages
+
+    workflow = await analyze_chat_workflow()
+    state = await workflow.ainvoke(
+        {'user_id': f"session_{user_id}", 'selected_chat': selected_chat},
+        config={'thread_id': get_thread_id(context)}
+    )
+    analysis_result = state['messages'][-1].content
+    await update.message.reply_text(
+        f"Analysis of chat '{chat_name}':\n{analysis_result}",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return ConversationHandler.END
+
+
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle incoming messages."""
+    user_id = update.effective_user.id
+    session_name = f"session_{user_id}"
+
+    if not await is_bot_authorized(update):
+        await authorize(update, context)
+        return
+
+    # Process the incoming mes  sage
+    workflow = await chat_workflow()
+    state = await workflow.ainvoke(
+        {'user_id': session_name, 'messages': [update.message.text]},
+        config={'thread_id': get_thread_id(context)}
+    )
+    response = state['messages'][-1].content
+    await update.message.reply_text(response)
+
+    chats_to_select = state.get('chats_to_select')
+    if chats_to_select:
+        await workflow.aupdate_state({'configurable': {'thread_id': get_thread_id(context)}}, 
+                                    {'chats_to_select': None})
+        context.user_data['chat_results'] = chats_to_select
+        keyboard = [[chat['chat_name']] for chat in chats_to_select]
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        await update.message.reply_text(
+            "I found the following chats. Please select one:",
+            reply_markup=reply_markup,
+        )
+        return SELECT_CHAT
+    
+    unread_chats = state.get('unread_chats')
+    if unread_chats:
+        await workflow.aupdate_state({'configurable': {'thread_id': get_thread_id(context)}}, 
+                                    {'unread_chats': None})
+        context.user_data['unread_chats'] = unread_chats
         keyboard = [
-            [InlineKeyboardButton("What I Missed", callback_data="what_i_missed")],
-            [InlineKeyboardButton("Help", callback_data="help")],
-            [InlineKeyboardButton("Clear", callback_data="clear")],
+            [InlineKeyboardButton(ACTION_MARK_AS_READ, callback_data="mark_as_read")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "Welcome to the Telegram Summarizer Bot! Use the buttons below to get started:",
-            reply_markup=reply_markup
+            "I found unread messages. Would you like to mark them as read?",
+            reply_markup=reply_markup,
         )
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Displays info on how to use the bot."""
-    await update.message.reply_text(
-        "Use /start to test this bot. Use /clear to clear the stored data so that you can see "
-        "what happens, if the button data is not available. "
-    )
-
-
-async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Clears the callback data cache"""
-    context.bot.callback_data_cache.clear_callback_data()
-    context.bot.callback_data_cache.clear_callback_queries()
-    # Clear Redis cache for the user
-    user_id = update.effective_user.id
-    await clear_for_user(user_id)
-    await update.effective_message.reply_text("All clear!")
-    
-
-async def handle_freeform_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles freeform text messages from users."""
-
-    auth = await store.get_object(f"auth:{update.effective_user.id}")
-    if auth:
-        await handle_code(update, auth)
-    else:
-        await bot_handler(update, 
-                          session_id=await get_thread_id(update.effective_user.id),
-                          action='message')
-        await set_expire_for_user(update.effective_user.id)
-
-async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the 'Mark as Read' button."""
-    await bot_handler(update, action='mark_as_read')
-
-
-async def no_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the 'Cancel' button."""
-    await update.callback_query.answer()  # Acknowledge the callback query
-    state = context.user_data.get('state', {})
-    state['messages'].append(HumanMessage("Cancel"))
-    state['messages'].append(AIMessage("Ok"))
-    await update.effective_message.edit_text(
-        "No action was taken."
-    )
-
-
-async def select_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the selection of a chat from the 'chats_to_select' buttons."""
-    user_id = update.effective_user.id
-    state = await get_user_state(user_id)  # Retrieve state from Redis
-
-    # Extract the selected chat ID from the callback data
-    callback_data = update.callback_query.data
-    selected_chat_id = callback_data.split(":")[1]  # Extract chat ID from "select_chat:<chat_id>"
-
-    # Find the selected chat in the state
-    selected_chat = next(
-        (chat for chat in state.get('chats_to_select', []) if str(chat['chat_id']) == selected_chat_id),
-        None
-    )
-    state['chats_to_select'] = []
-    
-
-    if selected_chat:
-        # Save the selected chat in the state
-        # state['messages'].append(HumanMessage(f"Chat ID: '{selected_chat['chat_name']}' selected."))
-        state = await chat_with_bot(user_id, f"Chat '{selected_chat['chat_name']}' with ID: {selected_chat['chat_id']} selected.")
-        await update.callback_query.answer()
-        await update.effective_message.edit_text(
-            state['messages'][-1].content
-        )
-
-        # Notify the user
-        
-    else:
-        # Handle the case where the chat is not found
-        await update.callback_query.answer("Chat not found.", show_alert=True)
-    
-    await save_user_state(user_id, state)  # Save updated state to Redis
 
 
 def main() -> None:
-    """Run the bot."""
-    persistence = PicklePersistence(filepath="arbitrarycallbackdatabot")
-    application = (
-        Application.builder()
-        .token(os.getenv("TELEGRAM_TOKEN"))
-        .persistence(persistence)
-        .arbitrary_callback_data(True)
-        .build()
+    """Run the Telegram bot."""
+    application = ApplicationBuilder().arbitrary_callback_data(True).token(os.getenv("TELEGRAM_TOKEN")).build()
+
+    auth_handler = ConversationHandler(
+        entry_points=[CommandHandler("authorize", authorize)],
+        states={
+            SHARE_CONTACT: [MessageHandler(filters.CONTACT, receive_contact)],
+            ENTER_CODE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_code),
+                CommandHandler("resend", resend_code),
+            ],
+            ENTER_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_password)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    application.add_handler(CommandHandler("missed", what_i_missed))
+    analyze_handler = ConversationHandler(
+        entry_points=[CommandHandler("analyze", analyze)],
+        states={
+            ENTER_CHAT_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_query)],
+            SELECT_CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_selection)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    chat_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler)],
+        states={
+            ENTER_CHAT_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_query)],
+            SELECT_CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_selection)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    # Add the custom action handler using a Regex filter matching the action constants 
+
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("clear", clear))
-    application.add_handler(CommandHandler("analyze", analyze_chat))
-    application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
-    application.add_handler(
-        CallbackQueryHandler(mark_as_read, pattern="mark_as_read")
-    )  # Add the new handler here
-    application.add_handler(
-        CallbackQueryHandler(no_action, pattern="no_action")
-    )
-    application.add_handler(
-        CallbackQueryHandler(select_chat, pattern="select_chat:")
-    )
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_freeform_message))  # Freeform handler
+    application.add_handler(CommandHandler("summary", summary))
+    application.add_handler(CallbackQueryHandler(mark_as_read, pattern="mark_as_read"))
+    application.add_handler(auth_handler)
+    application.add_handler(analyze_handler)
+    application.add_handler(chat_handler)
 
-    # Run the bot until the user presses Ctrl-C
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

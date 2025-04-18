@@ -8,7 +8,7 @@ SYSTEM_MESSAGE = """
 SUMMARIZE_PROMPT_TEMPLATE = """
     Summarize messages in given chats in several sentences for every chat.
     Include the most important information and key points.
-    Use the following format:
+    Answer in the language of the user's messages.
     
     the chats are: {chats}
 """
@@ -17,8 +17,7 @@ ANALYZE_CHAT_PROMPT_TEMPLATE = """
     Analyze the given chat and provide insights about it.
     Analyze sentiment, engagement, and any other relevant metrics.
     Provide a summary of the chat's activity and any notable trends.
-    You must give your answer in Ukrainian language.
-    
+    Answer in the language of the user's messages.
     the chat is: {chat}
 """
 
