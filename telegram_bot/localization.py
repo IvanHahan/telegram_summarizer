@@ -57,7 +57,7 @@ MESSAGES = {
         ),
         # Button labels
         "action_mark_as_read": "Mark as Read",
-        "chats_to_select_from": "Chats to select from: {chats}",
+        "chats_to_select_from": "Found chats for the given query:\n\n{chats}",
     },
     "uk": {
         "start_authorized": "Ви вже авторизовані. Будь ласка, оберіть дію:",
@@ -111,7 +111,7 @@ MESSAGES = {
         ),
         # Button labels
         "action_mark_as_read": "Відмітити як прочитане",
-        "chats_to_select_from": "Чати для вибору: {chats}",
+        "chats_to_select_from": "Знайдені чати за запитом:\n\n{chats}",
     },
 }
 

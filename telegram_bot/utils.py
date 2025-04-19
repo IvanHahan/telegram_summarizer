@@ -35,6 +35,6 @@ def format_chats(chats):
 
 
 def format_messages(messages):
-    return [
+    return "\n".join([
             f"{msg['sender_name']}: {msg['text']}" if 'sender_name' in msg else msg['text'] for msg in messages if msg['text']
-        ]
+        ])

@@ -48,7 +48,7 @@ def analyze_retrieved_chat_tool():
 
 # --- LLM and Tool Setup ---
 llm = create_llm()
-llm_with_tools = llm.bind_tools([
+tools = [
     get_unread_chats_tool, 
     search_chat_tool, 
     send_message_tool,
@@ -56,7 +56,8 @@ llm_with_tools = llm.bind_tools([
     summarize_unread_chats_tool,
     get_chat_history_tool,
     analyze_retrieved_chat_tool
-])
+]
+llm_with_tools = llm.bind_tools(tools)
 
 # --- State Definition ---
 class State(TypedDict):
@@ -172,7 +173,7 @@ async def tool_node(state: State) -> State:
         tool = next(
             (
                 t
-                for t in [get_unread_chats_tool, search_chat_tool, send_message_tool]
+                for t in tools
                 if t.name == tool_name
             ),
             None,
@@ -180,7 +181,8 @@ async def tool_node(state: State) -> State:
         if tool:
             tool_result = await tool.ainvoke(tool_kwargs)
             if tool_name == "search_chat_tool" and isinstance(tool_result, list):
-                msg = t(state["user_id"], "chats_to_select_from").format(chats=tool_result)
+                chats_str = "\n".join([f"{chat['chat_name']} (ID: {chat['chat_id']})" for chat in tool_result])
+                msg = t(state["user_id"], "chats_to_select_from").format(chats=chats_str)
                 state["messages"].append(
                     ToolMessage(
                         name=tool_name,
@@ -188,7 +190,6 @@ async def tool_node(state: State) -> State:
                         tool_call_id=tool_call["id"]
                     )
                 )
-                state["chats_to_select"] = tool_result
                 return state
             elif tool_name == "get_unread_chats_tool":
                 state["unread_chats"] = tool_result
