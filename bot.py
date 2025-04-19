@@ -69,7 +69,7 @@ def get_thread_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
             context.user_data['thread_id'] = store.get(f'thread_id:{str(user_id)}')
         else:
             thread_id = uuid.uuid4().hex
-            store.set(f'thread_id:{str(user_id)}', thread_id, ex=3600)
+            store.set(f'thread_id:{str(user_id)}', thread_id, expire=3600)
             context.user_data['thread_id'] = thread_id
     return context.user_data['thread_id']
 
@@ -143,7 +143,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         workflow = await unread_history_workflow()
         res = await workflow.ainvoke(
             {'user_id': str(user_id)},
-            config={'thread_id': get_thread_id(context)}
+            config={'thread_id': get_thread_id(update, context)}
         )
         context.user_data['unread_chats'] = res.get('unread_chats')
         if context.user_data['unread_chats']:
@@ -174,7 +174,7 @@ async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 'user_id':str(user_id),
                 'unread_chats': context.user_data.get('unread_chats')
             },
-            config={'thread_id': get_thread_id(context)}
+            config={'thread_id': get_thread_id(update, context)}
         )
         context.user_data.pop('unread_chats', None)
         await update.callback_query.edit_message_text(res['messages'][-1].content)
@@ -262,7 +262,7 @@ async def analyze_selected_chat(update: Update, context: ContextTypes.DEFAULT_TY
     workflow = await analyze_chat_workflow()
     state = await workflow.ainvoke(
         {'user_id': str(user_id), 'selected_chat': selected_chat},
-        config={'thread_id': get_thread_id(context)}
+        config={'thread_id': get_thread_id(update, context)}
     )
     analysis_result = state['messages'][-1].content
     await update.message.reply_text(
@@ -284,17 +284,17 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     # Process the incoming message
-    workflow = await chat_workflow()
+    workflow = chat_workflow()
     state = await workflow.ainvoke(
         {'user_id': str(session_name), 'messages': [update.message.text]},
-        config={'thread_id': get_thread_id(context)}
+        config={'thread_id': get_thread_id(update, context)}
     )
     response = state['messages'][-1].content
     await update.message.reply_text(response)
 
     chats_to_select = state.get('chats_to_select')
     if chats_to_select:
-        await workflow.aupdate_state({'configurable': {'thread_id': get_thread_id(context)}}, 
+        await workflow.aupdate_state({'configurable': {'thread_id': get_thread_id(update, context)}}, 
                                     {'chats_to_select': None})
         context.user_data['chat_results'] = chats_to_select
         keyboard = [[chat['chat_name']] for chat in chats_to_select]
@@ -307,7 +307,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     unread_chats = state.get('unread_chats')
     if unread_chats:
-        await workflow.aupdate_state({'configurable': {'thread_id': get_thread_id(context)}}, 
+        await workflow.aupdate_state({'configurable': {'thread_id': get_thread_id(update, context)}}, 
                                     {'unread_chats': None})
         context.user_data['unread_chats'] = unread_chats
         keyboard = [

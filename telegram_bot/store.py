@@ -1,18 +1,19 @@
 import json
+import os
 
 import redis as sync_redis  # sync Redis client
 import redis.asyncio as aioredis
 
 
 class AsyncRedisStore:
-    def __init__(self, host='localhost', port=6379, db=0):
+    def __init__(self, redis_url='redis://localhost:6379/0'):
         """
         Initialize the RedisStore with connection parameters.
         :param host: Redis server hostname or IP address.
         :param port: Redis server port.
         :param db: Redis database index.
         """
-        self.redis_client = aioredis.Redis(host=host, port=port, db=db, decode_responses=True)
+        self.redis_client = aioredis.Redis.from_url(redis_url, decode_responses=True)
 
     async def set(self, key, value, expire=1800):
         """
@@ -75,14 +76,14 @@ class AsyncRedisStore:
 
 
 class RedisStore:
-    def __init__(self, host='localhost', port=6379, db=0):
+    def __init__(self, redis_url='redis://localhost:6379/0'):
         """
         Initialize the synchronous RedisStore with connection parameters.
         :param host: Redis server hostname or IP address.
         :param port: Redis server port.
         :param db: Redis database index.
         """
-        self.redis_client = sync_redis.Redis(host=host, port=port, db=db, decode_responses=True)
+        self.redis_client = sync_redis.Redis.from_url(redis_url, decode_responses=True)
 
     def set(self, key, value, expire=1800):
         """
@@ -208,7 +209,8 @@ _store_instance = None
 def get_store():
     global _store_instance
     if _store_instance is None:
-        _store_instance = create_store(store_type='redis', host='localhost', port=6379, db=0)
+        _store_instance = create_store(store_type=os.environ.get('STORE_TYPE', 'redis'), 
+                                       redis_url=os.environ.get('REDIS_URL', 'redis://localhost:6379/0'))
     return _store_instance
 
 store = get_store()

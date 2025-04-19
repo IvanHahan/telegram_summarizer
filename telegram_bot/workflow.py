@@ -1,10 +1,11 @@
 import os
+from contextlib import contextmanager
 from typing import Annotated, Union
 
 from langchain.prompts import PromptTemplate
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.checkpoint.redis import AsyncRedisSaver
+from langgraph.checkpoint.redis import RedisSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import Literal, TypedDict
@@ -195,19 +196,27 @@ async def tool_node(state: State) -> State:
     return state
 
 # --- Memory Creation ---
+@contextmanager
 def create_memory(memory_type: str = "redis"):
     """
-    Create a memory instance based on the specified type.
+    Create a memory instance based on the specified type,
+    yielding a context‐managed checkpointer.
     """
     if memory_type == "redis":
-        return AsyncRedisSaver.from_conn_string(
+        mem = RedisSaver.from_conn_string(
             os.getenv("REDIS_URL", "redis://localhost:6379/0")
         )
-    elif memory_type == "memory_saver":
-        return MemorySaver()
+    else:
+        mem = MemorySaver()
+    try:
+        yield mem
+    finally:
+        # only RedisSaver needs explicit teardown
+        if memory_type == "redis":
+            mem.close()
 
 # --- Workflow Setup ---
-async def chat_workflow(memory: str = "redis"):
+def chat_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
     workflow = StateGraph(State)
     workflow.add_node("chat_node", llm_with_tools_node)
     workflow.add_node("tool_node", tool_node)
@@ -222,29 +231,29 @@ async def chat_workflow(memory: str = "redis"):
     workflow.add_edge("mark_as_read_node", END)
     workflow.add_conditional_edges("chat_node", route_llm_request, ["tool_node", "unread_node", "analyze_chat_node", END])
 
-    async with create_memory(memory) as checkpointer:
+    with create_memory(memory) as checkpointer:
         return workflow.compile(checkpointer=checkpointer)
 
-async def unread_history_workflow(memory: str = "redis"):
+async def unread_history_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
     workflow = StateGraph(State)
     workflow.add_node("unread_node", unread_history_node)
     workflow.add_edge(START, "unread_node")
     workflow.add_edge("unread_node", END)
-    async with create_memory(memory) as checkpointer:
+    with create_memory(memory) as checkpointer:
         return workflow.compile(checkpointer=checkpointer)
 
-async def mark_as_read_workflow(memory: str = "redis"):
+async def mark_as_read_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
     workflow = StateGraph(State)
     workflow.add_node("mark_as_read_node", mark_as_read_node)
     workflow.add_edge(START, "mark_as_read_node")
     workflow.add_edge("mark_as_read_node", END)
-    async with create_memory(memory) as checkpointer:
+    with create_memory(memory) as checkpointer:
         return workflow.compile(checkpointer=checkpointer)
 
-async def analyze_chat_workflow(memory: str = "redis"):
+async def analyze_chat_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
     workflow = StateGraph(State)
     workflow.add_node("analyze_chat_node", analyze_chat_node)
     workflow.add_edge(START, "analyze_chat_node")
     workflow.add_edge("analyze_chat_node", END)
-    async with create_memory(memory) as checkpointer:
+    with create_memory(memory) as checkpointer:
         return workflow.compile(checkpointer=checkpointer)
