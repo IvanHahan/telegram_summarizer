@@ -106,27 +106,37 @@ async def get_unread_chats(
 
     return unread_chats
 
-async def get_chat_history(client, chat_id, hours=10):
+async def get_chat_history(client, chat_id, hours=10, max_words: int = None):
     """
-    Retrieve the message history of a specific chat within a given number of days.
+    Retrieve the message history of a specific chat within a given number of hours.
 
     Args:
         client (TelegramClient): An instance of the TelegramClient.
         chat_id (int or str): The ID or username of the chat to retrieve the history from.
-        max_days (int): The maximum number of days to look back for messages.
-
+        hours (int): The maximum number of hours to look back for messages.
+        max_words (int, optional): Maximum total number of words across all returned messages.
     Returns:
         list: A list of dictionaries containing message details.
     """
     messages = []
+    total_words = 0  # global word counter
     async for message in client.iter_messages(chat_id):
+        # stop if message is older than the specified hours window
         if (datetime.now(timezone.utc) - message.date).seconds > (hours * 3600):
             break 
+        # enforce max_words limit
+        text = message.text or ""
+        if max_words is not None:
+            words_in_msg = len(text.split())
+            if total_words + words_in_msg > max_words:
+                break
+            total_words += words_in_msg
+
         sender_name = None
         if message.sender and hasattr(message.sender, 'first_name'):
             sender_name = message.sender.first_name or message.sender.last_name or message.sender.username
         messages.append({
-            "text": message.text,
+            "text": text,
             "sender_id": message.sender_id,
             "date": message.date,
         })
