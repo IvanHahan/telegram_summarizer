@@ -55,6 +55,8 @@ MESSAGES = {
             "To send it securely, add {obf} to the code (e.g., if the code is 12345, send {example}). "
             "Enter the modified code within 2 minutes. Use /resend if it expires."
         ),
+        # Button labels
+        "action_mark_as_read": "Mark as Read",
     },
     "uk": {
         "start_authorized": "Ви вже авторизовані. Будь ласка, оберіть дію:",
@@ -106,6 +108,8 @@ MESSAGES = {
             "Щоб відправити його безпечно, додайте {obf} до коду (наприклад, якщо код 12345, надішліть {example}). "
             "Введіть змінений код протягом 2 хвилин. Використайте /resend, якщо код протерміновано."
         ),
+        # Button labels
+        "action_mark_as_read": "Відмітити як прочитане",
     },
 }
 

@@ -153,10 +153,13 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if context.user_data['unread_chats']:
             await update.message.reply_text(res['messages'][-2].content)
             keyboard = [
-                [InlineKeyboardButton(ACTION_MARK_AS_READ, callback_data="mark_as_read")]
+                [InlineKeyboardButton(t(user_id, "action_mark_as_read"), callback_data="mark_as_read")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(res['messages'][-1].content, reply_markup=reply_markup)
+            await update.message.reply_text(
+                res['messages'][-1].content,
+                reply_markup=reply_markup
+            )
         else:
             await update.message.reply_text(res['messages'][-1].content)
 
@@ -298,28 +301,32 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     chats_to_select = state.get('chats_to_select')
     if chats_to_select:
-        await workflow.aupdate_state({'configurable': {'thread_id': get_thread_id(update, context)}}, 
-                                    {'chats_to_select': None})
+        await workflow.aupdate_state(
+            {'configurable': {'thread_id': get_thread_id(update, context)}},
+            {'chats_to_select': None}
+        )
         context.user_data['chat_results'] = chats_to_select
         keyboard = [[chat['chat_name']] for chat in chats_to_select]
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
         await update.message.reply_text(
-            "I found the following chats. Please select one:",
+            t(user_id, "select_chat"),
             reply_markup=reply_markup,
         )
         return SELECT_CHAT
-    
+
     unread_chats = state.get('unread_chats')
     if unread_chats:
-        await workflow.aupdate_state({'configurable': {'thread_id': get_thread_id(update, context)}}, 
-                                    {'unread_chats': None})
+        await workflow.aupdate_state(
+            {'configurable': {'thread_id': get_thread_id(update, context)}},
+            {'unread_chats': None}
+        )
         context.user_data['unread_chats'] = unread_chats
         keyboard = [
-            [InlineKeyboardButton(ACTION_MARK_AS_READ, callback_data="mark_as_read")]
+            [InlineKeyboardButton(t(user_id, "action_mark_as_read"), callback_data="mark_as_read")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "I found unread messages. Would you like to mark them as read?",
+            t(user_id, "ask_mark_read"),
             reply_markup=reply_markup,
         )
 
