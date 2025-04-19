@@ -48,7 +48,7 @@ async def get_unread_chats(
 
         if dialog.unread_count > 0:  # Check if the chat has unread messages
             # Check if the chat is muted
-            is_muted = dialog.dialog.notify_settings and dialog.dialog.notify_settings.mute_until
+            is_muted = dialog.dialog.notify_settings and dialog.dialog.notify_settings.mute_until and dialog.dialog.notify_settings.mute_until > datetime.now(timezone.utc)
             if not include_muted and is_muted:
                 continue
             
