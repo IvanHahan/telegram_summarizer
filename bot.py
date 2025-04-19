@@ -291,7 +291,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     # Process the incoming message
-    workflow = chat_workflow()
+    workflow = await chat_workflow()
     state = await workflow.ainvoke(
         {'user_id': str(session_name), 'messages': [update.message.text]},
         config={'thread_id': get_thread_id(update, context)}
@@ -331,6 +331,20 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
 
+# --- Error Handler ---
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and notify the user with a localized message."""
+    logger.error(f"Exception while handling update {update!r}:", exc_info=context.error)
+    try:
+        if isinstance(update, Update) and update.effective_message:
+            user_id = update.effective_user.id
+            await update.effective_message.reply_text(
+                t(user_id, "unexpected_error")
+            )
+    except Exception:
+        logger.error("Failed to send localized error notification to user.", exc_info=True)
+
+
 def main() -> None:
     """Run the Telegram bot."""
     application = ApplicationBuilder().arbitrary_callback_data(True).token(os.getenv("TELEGRAM_TOKEN")).build()
@@ -357,15 +371,6 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    chat_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler)],
-        states={
-            ENTER_CHAT_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_query)],
-            SELECT_CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_selection)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-
     # Add language handlers
     application.add_handler(CommandHandler("language", language))
     application.add_handler(CallbackQueryHandler(language_callback, pattern=r"^lang_"))
@@ -383,6 +388,9 @@ def main() -> None:
     application.add_handler(
         CommandHandler("help", lambda u, c: c.bot.send_message(u.effective_chat.id, t(u.effective_user.id, "help_text")))
     )
+
+    # Add error handler
+    application.add_error_handler(error_handler)
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 

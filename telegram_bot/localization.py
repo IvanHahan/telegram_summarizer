@@ -38,7 +38,7 @@ MESSAGES = {
         "too_many_attempts_wait": "Too many attempts. Please wait {seconds} seconds and try again.",
         "authorization_error": "Authorization error: {error}",
         "numeric_code_prompt": "Please send a numeric code. Add {obf} to the Telegram code and try again.",
-        "auth_successful": "Authorization successful!",
+        "auth_successful": "Authorization successful! Perform /start to begin.",
         "code_expired": "The code has expired. Use /resend to get a new code or /cancel to stop.",
         "enter_2fa_password": "Two-factor authentication enabled. Please enter your password:",
         "invalid_code_or_error": "Invalid code or error: {error}. Ensure you added {obf} to the Telegram code. Use /resend for a new code or /cancel to stop.",
@@ -58,6 +58,7 @@ MESSAGES = {
         # Button labels
         "action_mark_as_read": "Mark as Read",
         "chats_to_select_from": "Found chats for the given query:\n\n{chats}",
+        "unexpected_error": "Sorry, an unexpected error occurred. Please try again later.",
     },
     "uk": {
         "start_authorized": "Ви вже авторизовані. Будь ласка, оберіть дію:",
@@ -92,7 +93,7 @@ MESSAGES = {
         "too_many_attempts_wait": "Забагато спроб. Будь ласка, зачекайте {seconds} секунд і спробуйте знову.",
         "authorization_error": "Помилка авторизації: {error}",
         "numeric_code_prompt": "Будь ласка, надішліть числовий код. Додайте {obf} до коду Telegram і спробуйте ще раз.",
-        "auth_successful": "Авторизація успішна!",
+        "auth_successful": "Авторизація успішна! Виконайте команду /start для початку роботи.",
         "code_expired": "Код протерміновано. Використайте /resend для отримання нового коду або /cancel для зупинки.",
         "enter_2fa_password": "Увімкнено двофакторну автентифікацію. Будь ласка, введіть свій пароль:",
         "invalid_code_or_error": "Некоректний код або помилка: {error}. Переконайтеся, що ви додали {obf} до коду Telegram. Використайте /resend для нового коду або /cancel для зупинки.",
@@ -112,6 +113,7 @@ MESSAGES = {
         # Button labels
         "action_mark_as_read": "Відмітити як прочитане",
         "chats_to_select_from": "Знайдені чати за запитом:\n\n{chats}",
+        "unexpected_error": "Вибачте, сталася невідома помилка. Будь ласка, спробуйте пізніше.",
     },
 }
 
