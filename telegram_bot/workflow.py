@@ -1,11 +1,10 @@
 import os
-from contextlib import contextmanager
 from typing import Annotated, Union
 
 from langchain.prompts import PromptTemplate
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.checkpoint.redis import RedisSaver
+from langgraph.checkpoint.redis import AsyncRedisSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
@@ -213,27 +212,22 @@ async def tool_node(state: State) -> State:
     return state
 
 # --- Memory Creation ---
-@contextmanager
 def create_memory(memory_type: str = "redis"):
     """
     Create a memory instance based on the specified type,
     yielding a context‐managed checkpointer.
     """
     if memory_type == "redis":
-        mem = RedisSaver.from_conn_string(
+        mem = AsyncRedisSaver.from_conn_string(
             os.getenv("REDIS_URL", "redis://localhost:6379/0")
         )
+        return mem
     else:
         mem = MemorySaver()
-    try:
-        yield mem
-    finally:
-        # only RedisSaver needs explicit teardown
-        if memory_type == "redis":
-            mem.close()
-
+        return mem
+        
 # --- Workflow Setup ---
-def chat_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
+async def chat_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
     workflow = StateGraph(State)
     workflow.add_node("chat_node", llm_with_tools_node)
     workflow.add_node("tool_node", tool_node)
@@ -248,7 +242,7 @@ def chat_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
     workflow.add_edge("mark_as_read_node", END)
     workflow.add_conditional_edges("chat_node", route_llm_request, ["tool_node", "unread_node", "analyze_chat_node", END])
 
-    with create_memory(memory) as checkpointer:
+    async with create_memory(memory) as checkpointer:
         return workflow.compile(checkpointer=checkpointer)
 
 async def unread_history_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
