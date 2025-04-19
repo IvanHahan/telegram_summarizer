@@ -128,7 +128,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context.user_data["lang"] = saved_lang
 
     if not await is_bot_authorized(update):
-        await authorize(update, context)
+        user_id = update.effective_user.id
+        await update.message.reply_text(
+            t(user_id, "start_unauth"),
+            reply_markup=get_actions_keyboard()
+        )
     else:
         await update.message.reply_text(
             t(user_id, "start_authorized"),
