@@ -250,7 +250,7 @@ async def unread_history_workflow(memory: str = os.environ.get("STORE_TYPE", "re
     workflow.add_node("unread_node", unread_history_node)
     workflow.add_edge(START, "unread_node")
     workflow.add_edge("unread_node", END)
-    with create_memory(memory) as checkpointer:
+    async with create_memory(memory) as checkpointer:
         return workflow.compile(checkpointer=checkpointer)
 
 async def mark_as_read_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
@@ -258,7 +258,7 @@ async def mark_as_read_workflow(memory: str = os.environ.get("STORE_TYPE", "redi
     workflow.add_node("mark_as_read_node", mark_as_read_node)
     workflow.add_edge(START, "mark_as_read_node")
     workflow.add_edge("mark_as_read_node", END)
-    with create_memory(memory) as checkpointer:
+    async with create_memory(memory) as checkpointer:
         return workflow.compile(checkpointer=checkpointer)
 
 async def analyze_chat_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
@@ -266,5 +266,5 @@ async def analyze_chat_workflow(memory: str = os.environ.get("STORE_TYPE", "redi
     workflow.add_node("analyze_chat_node", analyze_chat_node)
     workflow.add_edge(START, "analyze_chat_node")
     workflow.add_edge("analyze_chat_node", END)
-    with create_memory(memory) as checkpointer:
+    async with create_memory(memory) as checkpointer:
         return workflow.compile(checkpointer=checkpointer)
