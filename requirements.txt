@@ -5,6 +5,7 @@ python-dotenv
 langchain
 langgraph
 langgraph-checkpoint-redis
+langchain_openai
 
 # Development dependencies
 pytest
