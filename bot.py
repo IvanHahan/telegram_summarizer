@@ -377,7 +377,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(mark_as_read, pattern="mark_as_read"))
     application.add_handler(auth_handler)
     application.add_handler(analyze_handler)
-    application.add_handler(chat_handler)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
     # Add help handler
     application.add_handler(

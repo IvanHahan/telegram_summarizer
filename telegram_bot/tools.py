@@ -1,16 +1,13 @@
-from langchain.prompts import PromptTemplate
 from langchain.tools import tool
 
 from telegram_bot.telegram_utils import (
     create_telegram_client,
+    get_chat_history,
     get_unread_chats,
     mark_chats_as_read,
     search_chat,
     send_message,
 )
-
-from .prompts import SUMMARIZE_PROMPT_TEMPLATE
-from .utils import format_chats
 
 
 @tool
@@ -58,6 +55,24 @@ async def search_chat_tool(user_id: str, query: str, top_k: int = 5):
 
 
 @tool
+async def get_chat_history_tool(user_id: str, chat_id: int) -> list:
+    """
+    Fetch the message history of a specific chat.
+
+    Args:
+        user_id (str): The ID of the user. Can be ignored
+        chat_id (int): The ID of the chat to fetch the history from.
+        limit (int): The maximum number of messages to retrieve. Defaults to 100.
+
+    Returns:
+        list: A list of messages from the chat history.
+    """
+    async with create_telegram_client(user_id) as client:
+        messages = await get_chat_history(client, chat_id, hours=24, max_words=10000)
+    return messages
+
+
+@tool
 async def send_message_tool(user_id: str, chat_id: int, message: str) -> str:
     """
     Use to send a message to a specific chat by its ID.
@@ -74,100 +89,6 @@ async def send_message_tool(user_id: str, chat_id: int, message: str) -> str:
     async with create_telegram_client(user_id) as client:
         await send_message(client, chat_id, message)
     return f"Message sent to chat ID {chat_id}."
-
-
-@tool
-async def generate_summary_tool(user_id: str, chats: list) -> str:
-    """
-    Generate a summary for the given chats.
-    Always use this tool after the get_unread_chats_tool to summarize the unread messages.
-
-    Args:
-        user_id (str): The ID of the user. Can be ignored
-        chats (list): A list of chat objects ready for summary generation.
-
-    Returns:
-        str: The generated summary.
-    """
-    summarization_prompt = PromptTemplate(
-        input_variables=["chats", "optional_instruction"],
-        template=SUMMARIZE_PROMPT_TEMPLATE
-    ).partial(optional_instruction="")
-    limit_context_error = False
-
-    def func(chats, summarization_prompt):
-        nonlocal limit_context_error  # Use nonlocal to modify the variable in the enclosing scope
-        try:
-            return (summarization_prompt | llm).invoke(input={'chats': format_chats(chats)})
-        except Exception as e:
-            if e.code == 'context_length_exceeded':
-                if len(chats) < 5:
-                    for chat in chats:
-                        chat['unread_messages'] = chat['unread_messages'][:len(chat['unread_messages']) // 2]
-                chats = chats[:len(chats) // 2]
-                limit_context_error = True
-                summarization_prompt = summarization_prompt.partial(
-                    optional_instruction="Inform user that this is a partial summary due to context limitations"
-                )
-                return func(chats, summarization_prompt)
-
-    response = func(chats, summarization_prompt)
-    return response
-
-
-@tool
-async def get_unread_history_tool(user_id: str, include_groups=True, include_private=True, include_channels=True, include_muted=False) -> str:
-    """
-    Fetch unread chats from Telegram and generate a summary of their unread messages.
-
-    Args:
-        user_id (str): The ID of the user. Can be ignored
-        include_groups (bool): If True, include group chats in the results.
-        include_private (bool): If True, include private chats in the results.
-        include_channels (bool): If True, include channels, news channels in the results.
-        include_muted (bool): If True, include muted chats in the results.
-
-    Returns:
-        str: A summary of the unread messages from the selected chats.
-    """
-    unread_chats = await get_unread_chats_tool(
-        user_id=user_id,
-        include_groups=include_groups,
-        include_private=include_private,
-        include_channels=include_channels,
-        include_muted=include_muted
-    )
-    summary = await generate_summary_tool(user_id, unread_chats)
-    return summary
-
-
-@tool
-async def try_send_message_tool(user_id: str, query: str, message: str) -> str:
-    """
-    Search for a chat by query and send a message to it.
-
-    Args:
-        user_id (str): The ID of the user.
-        query (str): The name or ID of the chat to search for. If ID is provided, use it directly.
-        message (str): The message content to send.
-
-    Returns:
-        str: A confirmation message indicating the result of the operation or an error message if the chat is not found.
-    """
-    if isinstance(query, int):
-        # If the query is an integer, treat it as a chat ID
-        chat_id = query
-        confirmation = await send_message_tool(user_id, chat_id, message)
-        return confirmation
-
-    results = await search_chat_tool(user_id, query)
-
-    if isinstance(results, dict):
-        chat_id = results['id']
-        chat_id = results[0]['id']  # Assuming the first result is the most relevant
-        confirmation = await send_message_tool(user_id, chat_id, message)
-        return confirmation
-
 
 @tool
 async def mark_chats_as_read_tool(user_id: str, chat_ids: list) -> str:
