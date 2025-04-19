@@ -181,9 +181,13 @@ async def tool_node(state: State) -> State:
         if tool:
             tool_result = await tool.ainvoke(tool_kwargs)
             if tool_name == "search_chat_tool" and isinstance(tool_result, list):
-                msg = 'Chats to select from: ' + str(tool_result)
+                msg = t(state["user_id"], "chats_to_select_from").format(chats=tool_result)
                 state["messages"].append(
-                    ToolMessage(name=tool_name, content=msg, tool_call_id=tool_call["id"])
+                    ToolMessage(
+                        name=tool_name,
+                        content=msg,
+                        tool_call_id=tool_call["id"]
+                    )
                 )
                 state["chats_to_select"] = tool_result
                 return state
@@ -191,7 +195,11 @@ async def tool_node(state: State) -> State:
                 state["unread_chats"] = tool_result
                 tool_result = format_chats(tool_result)
             state["messages"].append(
-                ToolMessage(name=tool_name, content=tool_result, tool_call_id=tool_call["id"])
+                ToolMessage(
+                    name=tool_name,
+                    content=tool_result,
+                    tool_call_id=tool_call["id"]
+                )
             )
     return state
 
