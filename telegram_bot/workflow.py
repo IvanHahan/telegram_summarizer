@@ -8,7 +8,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.redis import RedisSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
-from typing_extensions import Literal, TypedDict
+from typing_extensions import TypedDict
 
 from telegram_bot.localization import t
 
@@ -18,14 +18,14 @@ from .prompts import (
     SYSTEM_MESSAGE,
 )
 from .tools import (
-    format_chats,
+    get_chat_history_tool,
     get_unread_chats_tool,
     mark_chats_as_read_tool,
     search_chat_tool,
     send_message_tool,
     tool,
 )
-from .utils import create_llm
+from .utils import create_llm, format_chats, format_messages
 
 
 @tool
@@ -53,19 +53,18 @@ llm_with_tools = llm.bind_tools([
     search_chat_tool, 
     send_message_tool,
     mark_chats_as_read_tool,
-    summarize_unread_chats_tool
+    summarize_unread_chats_tool,
+    get_chat_history_tool,
+    analyze_retrieved_chat_tool
 ])
 
 # --- State Definition ---
 class State(TypedDict):
-    action: Literal["message", "unread_summary", "mark_as_read", "auth_code", "clear"]
     messages: Annotated[list, add_messages]
     chats_to_select: Union[list, dict]
     selected_chat: dict
     user_id: str
-    auth: dict
     unread_chats: list
-    thread_id: str
 
 # --- Routing Functions ---
 def route_llm_request(state: State) -> str:
@@ -194,6 +193,15 @@ async def tool_node(state: State) -> State:
             elif tool_name == "get_unread_chats_tool":
                 state["unread_chats"] = tool_result
                 tool_result = format_chats(tool_result)
+            elif tool_name == "get_chat_history_tool":
+                state["messages"].append(
+                    ToolMessage(
+                        name=tool_name,
+                        content=format_messages(tool_result),
+                        tool_call_id=tool_call["id"]
+                    )
+                )
+                return state
             state["messages"].append(
                 ToolMessage(
                     name=tool_name,

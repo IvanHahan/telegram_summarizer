@@ -32,3 +32,9 @@ def format_chats(chats):
             title = 'Group'
         formatted_chats.append(f"{title}: {chat_name}\n" + f"Chat ID: {chat['chat_id']}\n" + "\n".join(formatted_messages))
     return "\n\n".join(formatted_chats)
+
+
+def format_messages(messages):
+    return [
+            f"{msg['sender_name']}: {msg['text']}" if 'sender_name' in msg else msg['text'] for msg in messages if msg['text']
+        ]
