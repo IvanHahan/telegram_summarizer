@@ -9,6 +9,7 @@ from telethon.errors import (
     SessionPasswordNeededError,
 )
 
+from telegram_bot.analytics import track_event  # new import
 from telegram_bot.localization import t
 from telegram_bot.telegram_utils import create_telegram_client, is_authorized
 
@@ -127,6 +128,7 @@ async def receive_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         # Attempt sign-in with the decoded code
         await client.sign_in(phone_number, real_code)
         await update.message.reply_text(t(user_id, "auth_successful"))
+        await track_event(user_id, "successful_authorization")  # log the successful authorization
         await _clean_up_session(client, context)
         return ConversationHandler.END
         
@@ -166,6 +168,7 @@ async def receive_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Attempt sign-in with password
         await client.sign_in(password=password)
         await update.message.reply_text(t(user_id, "auth_successful_2fa"))
+        await track_event(user_id, "successful_authorization")  # log the successful authorization
         await _clean_up_session(client, context)
         return ConversationHandler.END
         
