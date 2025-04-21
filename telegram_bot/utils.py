@@ -1,17 +1,9 @@
-import os
 
 from langchain_openai import ChatOpenAI
 
 
 def create_llm():
-    return ChatOpenAI(model_name="gpt-4-turbo")
-    return ChatOpenAI(model_name="gpt-3.5-turbo")
-    return ChatOpenAI(
-        base_url="https://api.together.xyz/v1",
-        api_key=os.environ["TOGETHER_API_KEY"],
-        model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-    )
-
+    return ChatOpenAI(model_name="gpt-4.1-nano")
 
 # --- Formatting Functions ---
 def format_chats(chats):

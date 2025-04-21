@@ -28,6 +28,7 @@ from login_handler import (
     receive_password,
     resend_code,
 )
+from telegram_bot.analytics import track_event  # new import for analytics logging
 from telegram_bot.localization import LANGUAGES, t
 from telegram_bot.store import store
 from telegram_bot.telegram_utils import (
@@ -121,6 +122,7 @@ async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command."""
     user_id = update.effective_user.id
+    await track_event(user_id, "start_executed")  # analytics logging added
 
     # load persisted language if any
     saved_lang = store.get(f"lang:{user_id}")
@@ -128,7 +130,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context.user_data["lang"] = saved_lang
 
     if not await is_bot_authorized(update):
-        user_id = update.effective_user.id
         await update.message.reply_text(
             t(user_id, "start_unauth"),
             reply_markup=get_actions_keyboard()
@@ -142,8 +143,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Fetch and display unread messages; offer marking them as read."""
+    user_id = update.effective_user.id
+    await track_event(user_id, "summary_executed")  # analytics logging added
+
     if await is_bot_authorized(update):
-        user_id = update.effective_user.id
         workflow = await unread_history_workflow()
         res = await workflow.ainvoke(
             {'user_id': str(user_id)},
@@ -162,9 +165,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         else:
             await update.message.reply_text(res['messages'][-1].content)
-
     else:
-        user_id = update.effective_user.id
         await update.message.reply_text(
             t(user_id, "start_unauth"),
             reply_markup=get_actions_keyboard()
@@ -198,10 +199,10 @@ async def mark_as_read(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start /analyze conversation by asking the user for a chat query."""
     user_id = update.effective_user.id
+    await track_event(user_id, "analyze_executed")  # analytics logging added
+
     if not await is_bot_authorized(update):
-        await update.message.reply_text(
-            t(user_id, "start_unauth")
-        )
+        await update.message.reply_text(t(user_id, "start_unauth"))
         return ConversationHandler.END
 
     await update.message.reply_text(
@@ -282,7 +283,7 @@ async def analyze_selected_chat(update: Update, context: ContextTypes.DEFAULT_TY
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle incoming messages."""
     user_id = update.effective_user.id
-    session_name = user_id
+    await track_event(user_id, "message_handler_executed")  # analytics logging added
 
     if not await is_bot_authorized(update):
         await update.message.reply_text(
@@ -293,7 +294,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Process the incoming message
     workflow = await chat_workflow()
     state = await workflow.ainvoke(
-        {'user_id': str(session_name), 'messages': [update.message.text]},
+        {'user_id': str(user_id), 'messages': [update.message.text]},
         config={'thread_id': get_thread_id(update, context)}
     )
     response = state['messages'][-1].content
