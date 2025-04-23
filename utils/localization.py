@@ -1,4 +1,4 @@
-from telegram_bot.store import store
+from .store import store
 
 # Supported locales
 LANGUAGES = {"en": "English", "uk": "Українська"}
@@ -59,6 +59,17 @@ MESSAGES = {
         "action_mark_as_read": "Mark as Read",
         "chats_to_select_from": "Found chats for the given query:\n\n{chats}",
         "unexpected_error": "Sorry, an unexpected error occurred. Please try again later.",
+        "suggest_actions": """
+    Based on the conversation, suggest me some actions the I can take next.
+    The actions should be in the format of a list, one action per line.
+    Answer with only the actions, no additional text.
+    The tools available to you are:
+    {tools}
+
+    Dont mention instrument names directly in your answer.
+    Dont suggest any actions that are not available to you or you cant do on your own without tools.
+    """,
+        "clear_done": "Cleared conversation data.",
     },
     "uk": {
         "start_authorized": "Ви вже авторизовані. Будь ласка, оберіть дію:",
@@ -114,6 +125,16 @@ MESSAGES = {
         "action_mark_as_read": "Відмітити як прочитане",
         "chats_to_select_from": "Знайдені чати за запитом:\n\n{chats}",
         "unexpected_error": "Вибачте, сталася невідома помилка. Будь ласка, спробуйте пізніше.",
+        "suggest_actions": """
+На основі розмови запропонуй деякі дії, які я можу виконати далі.
+Дії мають бути у форматі списку, по одній дії в рядку.
+Відповідай лише переліком дій, без додаткового тексту.
+Доступні інструменти:
+{tools}
+не видавай назви інструментів напряму у відповіді.
+Не пропонуй ніяких дій, які недоступні вам або які ви не можете виконати самостійно без інструментів.
+""",
+        "clear_done": "Дані очищено.",
     },
 }
 

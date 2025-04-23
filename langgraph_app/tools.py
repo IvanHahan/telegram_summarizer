@@ -1,6 +1,6 @@
 from langchain.tools import tool
 
-from telegram_bot.telegram_utils import (
+from ..utils.telegram_utils import (
     create_telegram_client,
     get_chat_history,
     get_unread_chats,

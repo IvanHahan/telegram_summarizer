@@ -1,21 +1,19 @@
 import os
-from typing import Annotated, Union
 
 from langchain.prompts import PromptTemplate
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.redis import AsyncRedisSaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.message import add_messages
-from typing_extensions import TypedDict
 
-from telegram_bot.localization import t
+from utils.localization import t
 
 from .prompts import (
     ANALYZE_CHAT_PROMPT_TEMPLATE,
     SUMMARIZE_PROMPT_TEMPLATE,
     SYSTEM_MESSAGE,
 )
+from .state import State
 from .tools import (
     get_chat_history_tool,
     get_unread_chats_tool,
@@ -45,6 +43,7 @@ def analyze_retrieved_chat_tool():
     """
     pass
 
+
 # --- LLM and Tool Setup ---
 llm = create_llm()
 tools = [
@@ -57,14 +56,6 @@ tools = [
     analyze_retrieved_chat_tool
 ]
 llm_with_tools = llm.bind_tools(tools)
-
-# --- State Definition ---
-class State(TypedDict):
-    messages: Annotated[list, add_messages]
-    chats_to_select: Union[list, dict]
-    selected_chat: dict
-    user_id: str
-    unread_chats: list
 
 # --- Routing Functions ---
 def route_llm_request(state: State) -> str:
@@ -162,6 +153,16 @@ async def llm_with_tools_node(state: State) -> State:
     state["messages"].append(response)
     return state
 
+async def suggest_actions_node(state: State) -> State:
+    last_message = state["messages"][-1]
+    tool_descriptions = "\n".join([f"- {tool.name}: {tool.__doc__.strip()}" for tool in tools])
+    messages = [SystemMessage(SYSTEM_MESSAGE), 
+                last_message, 
+                HumanMessage(t(state["user_id"], "suggest_actions").format(tools=tool_descriptions))]
+    response = llm.invoke(input=messages)
+    state["messages"].append(response)
+    return state
+
 async def tool_node(state: State) -> State:
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
@@ -227,7 +228,7 @@ def create_memory(memory_type: str = "redis"):
         return mem
         
 # --- Workflow Setup ---
-async def chat_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
+def chat_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
     workflow = StateGraph(State)
     workflow.add_node("chat_node", llm_with_tools_node)
     workflow.add_node("tool_node", tool_node)
@@ -242,29 +243,4 @@ async def chat_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
     workflow.add_edge("mark_as_read_node", END)
     workflow.add_conditional_edges("chat_node", route_llm_request, ["tool_node", "unread_node", "analyze_chat_node", END])
 
-    async with create_memory(memory) as checkpointer:
-        return workflow.compile(checkpointer=checkpointer)
-
-async def unread_history_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
-    workflow = StateGraph(State)
-    workflow.add_node("unread_node", unread_history_node)
-    workflow.add_edge(START, "unread_node")
-    workflow.add_edge("unread_node", END)
-    async with create_memory(memory) as checkpointer:
-        return workflow.compile(checkpointer=checkpointer)
-
-async def mark_as_read_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
-    workflow = StateGraph(State)
-    workflow.add_node("mark_as_read_node", mark_as_read_node)
-    workflow.add_edge(START, "mark_as_read_node")
-    workflow.add_edge("mark_as_read_node", END)
-    async with create_memory(memory) as checkpointer:
-        return workflow.compile(checkpointer=checkpointer)
-
-async def analyze_chat_workflow(memory: str = os.environ.get("STORE_TYPE", "redis")):
-    workflow = StateGraph(State)
-    workflow.add_node("analyze_chat_node", analyze_chat_node)
-    workflow.add_edge(START, "analyze_chat_node")
-    workflow.add_edge("analyze_chat_node", END)
-    async with create_memory(memory) as checkpointer:
-        return workflow.compile(checkpointer=checkpointer)
+    return workflow.compile()

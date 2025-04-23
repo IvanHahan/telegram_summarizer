@@ -9,9 +9,9 @@ from telethon.errors import (
     SessionPasswordNeededError,
 )
 
-from telegram_bot.analytics import track_event  # new import
-from telegram_bot.localization import t
-from telegram_bot.telegram_utils import create_telegram_client, is_authorized
+from ..utils.analytics import track_event  # new import
+from ..utils.localization import t
+from ..utils.telegram_utils import create_telegram_client, is_authorized
 
 logger = logging.getLogger(__name__)
 
