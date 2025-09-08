@@ -2,7 +2,7 @@
 from telegram import Update
 
 from ..utils.store import store
-from ..utils.telegram_utils import is_authorized
+from ..utils.telegram_utils import create_telegram_handler
 
 
 def get_state(update: Update) -> dict:
@@ -19,7 +19,9 @@ def set_state(update: Update, state: dict) -> None:
     store.set_object(str(update.effective_user.id), state.to_dict())
 
 
-async def is_bot_authorized(update: Update) -> bool:
+def is_bot_authorized(update: Update) -> bool:
     """Check if the current user is authorized."""
-    user_id = update.effective_user.id
-    return await is_authorized(user_id)
+    user_id = str(update.effective_user.id)
+    handler = create_telegram_handler(user_id)
+    with handler:
+        return handler.is_authorized()
