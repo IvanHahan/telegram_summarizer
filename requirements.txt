@@ -6,7 +6,7 @@ langchain
 langgraph
 langgraph-checkpoint-redis
 langchain_openai
-aiohttp
+requests
 
 # Development dependencies
 pytest

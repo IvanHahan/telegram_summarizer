@@ -1,0 +1,7 @@
+[build]
+# Install required packages
+command = "pip install -r requirements.txt"
+
+[deploy]
+# Command to start your Telegram bot
+command = "python bot.py"

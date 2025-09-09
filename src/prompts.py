@@ -6,11 +6,22 @@ SYSTEM_MESSAGE = """
 """
 
 SUMMARIZE_PROMPT_TEMPLATE = """
-    Summarize messages in given chats in several sentences for every chat.
-    Include the most important information and key points.
-    Answer in the language of the user's messages.
-    
-    the chats are: {chats}
+You are an assistant that summarizes chat conversations. 
+
+Task:
+- For each chat in the list, provide a concise summary in **several sentences**.
+- Include the **most important information and key points**.
+- Write the summary in the **same language** as the messages in that chat.
+- Number the chats in your response, matching the order provided.
+
+The chats are:
+{chats}
+
+Output Format Example:
+1. Chat 1: <summary of the first chat>
+2. Chat 2: <summary of the second chat>
+3. Chat 3: <summary of the third chat>
+...
 """
 
 ANALYZE_CHAT_PROMPT_TEMPLATE = """

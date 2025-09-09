@@ -1,17 +1,10 @@
 from langchain.tools import tool
 
-from ..utils.telegram_utils import (
-    create_telegram_client,
-    get_chat_history,
-    get_unread_chats,
-    mark_chats_as_read,
-    search_chat,
-    send_message,
-)
+from ..utils.telegram_utils import create_telegram_handler
 
 
 @tool
-async def get_unread_chats_tool(user_id: str, include_groups=True, include_private=True, include_channels=True, include_muted=False) -> list:
+def get_unread_chats_tool(user_id: str, include_groups=True, include_private=True, include_channels=True, include_muted=False) -> list:
     """
     Fetch unread chats from Telegram, including groups, private chats, and channels. 
     Call this tool only if the user requests it.
@@ -27,9 +20,8 @@ async def get_unread_chats_tool(user_id: str, include_groups=True, include_priva
     Returns:
         list: A list of unread chats with their details, filtered based on the provided arguments.
     """
-    async with create_telegram_client(user_id) as client:
-        unread_chats = await get_unread_chats(
-            client,
+    with create_telegram_handler(user_id) as handler:
+        unread_chats = handler.get_unread_chats(
             include_groups=include_groups,
             include_private=include_private,
             include_channels=include_channels,
@@ -39,7 +31,7 @@ async def get_unread_chats_tool(user_id: str, include_groups=True, include_priva
 
 
 @tool
-async def search_chat_tool(user_id: str, query: str, top_k: int = 5):
+def search_chat_tool(user_id: str, query: str, top_k: int = 5):
     """
     Use when you need to retrieve chat ID.
     If it returns a list of chats, User must select the one.
@@ -49,13 +41,13 @@ async def search_chat_tool(user_id: str, query: str, top_k: int = 5):
         query (str or int): The name or ID of the chat to search for.
         top_k (int): The number of top similar chats to return if the query is a string.
     """
-    async with create_telegram_client(user_id) as client:
-        results = await search_chat(client, query, top_k=top_k)
+    with create_telegram_handler(user_id) as handler:
+        results = handler.search_chat(query, top_k=top_k)
     return results
 
 
 @tool
-async def get_chat_history_tool(user_id: str, chat_id: int) -> list:
+def get_chat_history_tool(user_id: str, chat_id: int) -> list:
     """
     Fetch the message history of a specific chat.
 
@@ -67,13 +59,13 @@ async def get_chat_history_tool(user_id: str, chat_id: int) -> list:
     Returns:
         list: A list of messages from the chat history.
     """
-    async with create_telegram_client(user_id) as client:
-        messages = await get_chat_history(client, chat_id, hours=24, max_words=10000)
+    with create_telegram_handler(user_id) as handler:
+        messages = handler.get_chat_history(chat_id, hours=24, max_words=10000)
     return messages
 
 
 @tool
-async def send_message_tool(user_id: str, chat_id: int, message: str) -> str:
+def send_message_tool(user_id: str, chat_id: int, message: str) -> str:
     """
     Use to send a message to a specific chat by its ID.
     Use search_chat_tool to find the chat ID before using this tool if not found.
@@ -86,12 +78,12 @@ async def send_message_tool(user_id: str, chat_id: int, message: str) -> str:
     Returns:
         str: A confirmation message indicating the result of the operation.
     """
-    async with create_telegram_client(user_id) as client:
-        await send_message(client, chat_id, message)
+    with create_telegram_handler(user_id) as handler:
+        handler.send_message(chat_id, message)
     return f"Message sent to chat ID {chat_id}."
 
 @tool
-async def mark_chats_as_read_tool(user_id: str, chat_ids: list) -> str:
+def mark_chats_as_read_tool(user_id: str, chat_ids: list) -> str:
     """
     Mark the specified chats as read.
 
@@ -102,6 +94,6 @@ async def mark_chats_as_read_tool(user_id: str, chat_ids: list) -> str:
     Returns:
         str: A confirmation message indicating the result of the operation.
     """
-    async with create_telegram_client(user_id) as client:
-        await mark_chats_as_read(client, chat_ids)
+    with create_telegram_handler(user_id) as handler:
+        handler.mark_chats_as_read(chat_ids)
     return f"Marked {len(chat_ids)} chats as read."

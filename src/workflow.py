@@ -74,12 +74,12 @@ def route_user_request(state: State) -> str:
     return mapping.get(state["action"], END)
 
 # --- Node Functions ---
-async def unread_history_node(state: State) -> State:
+def unread_history_node(state: State) -> State:
     user_id = state["user_id"]
     state["messages"].append(HumanMessage(t(user_id, "prompt_unread_question")))
     chats = state.get("unread_chats")
     if not chats:
-        chats = await get_unread_chats_tool.ainvoke({"user_id": state["user_id"]})
+        chats = get_unread_chats_tool.invoke({"user_id": state["user_id"]})
     state["unread_chats"] = chats
     tool_calls = [{"name": "get_unread_chats_tool",
                    "args": {"user_id": state["user_id"]},
@@ -107,7 +107,7 @@ async def unread_history_node(state: State) -> State:
     state["messages"].append(AIMessage(t(user_id, "ask_mark_read")))
     return state
 
-async def analyze_chat_node(state: State) -> State:
+def analyze_chat_node(state: State) -> State:
     user_id = state["user_id"]
     state["messages"].append(HumanMessage(t(user_id, "analyze_given_chat")))
     chat = state.get("selected_chat")
