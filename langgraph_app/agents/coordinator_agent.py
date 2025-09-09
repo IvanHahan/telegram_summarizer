@@ -82,21 +82,7 @@ class CoordinatorAgent(BaseAgent):
                     "messages": messages,
                 }
             )
-
-            # Convert JSON result to Route object
-            intent_data = json_result.get("intent_resolution", {})
-            intent = Intent(
-                intent=intent_data.get("intent", "unknown"),
-                agent=intent_data.get("agent", "unknown"),
-                confidence=float(intent_data.get("confidence", 0.0)),
-                parameters=intent_data.get("parameters", {}),
-            )
-
-            route = Route(
-                intent_resolution=intent,
-                topic=json_result.get("topic", "No topic identified"),
-                keywords=json_result.get("keywords", []),
-            )
+            route = Route(**json_result)
 
             return route
 

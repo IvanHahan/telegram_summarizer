@@ -1,5 +1,6 @@
+from typing import Dict, List
 
-from dataclasses import dataclass
+from pydantic import BaseModel, Field
 
 
 class IntentNames:
@@ -8,29 +9,28 @@ class IntentNames:
     agree = "agree"
     disagree = "disagree"
 
-@dataclass
-class Intent:
+
+class Intent(BaseModel):
     intent: str
     agent: str
     confidence: float
-    parameters: dict = None
+    parameters: Dict = Field(default_factory=dict)
 
-@dataclass
-class Route:
+
+class Route(BaseModel):
     intent_resolution: Intent
     topic: str
-    keywords: list[str] = None
+    keywords: List[str] = Field(default_factory=list)
 
-@dataclass
-class IntentSpec:
+
+class IntentSpec(BaseModel):
     name: str
     description: str
-    examples: list[str] = []
+    examples: List[str] = Field(default_factory=list)
     weight: float = 1.0
-    parameters: dict = None
+    parameters: Dict = Field(default_factory=dict)
 
 
-@dataclass
-class AgentResponse:
+class AgentResponse(BaseModel):
     response: str
-    actions: list[str] = None
+    actions: List[str] = Field(default_factory=list)
