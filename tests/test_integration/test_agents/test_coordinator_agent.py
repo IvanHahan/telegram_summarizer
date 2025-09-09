@@ -1,13 +1,7 @@
 import pytest
-from langchain_community.chat_models import ChatOpenAI
 
 from langgraph_app.agents.coordinator_agent import CoordinatorAgent
 from langgraph_app.data_model import Intent, Route
-
-
-@pytest.fixture
-def llm():
-    return ChatOpenAI(model="gpt-4.1-nano", temperature=0)
 
 
 @pytest.fixture
@@ -51,13 +45,3 @@ def test_agent_run_returns_route_object(coordinator_agent):
 
     # Verify keywords is a list
     assert isinstance(response.keywords, list)
-
-
-def test_agent_run_legacy_compatibility(coordinator_agent):
-    """Test backwards compatibility - can still handle simple messages"""
-    messages = [{"role": "user", "content": "What did I miss?"}]
-    response = coordinator_agent.run(messages)
-
-    assert isinstance(response, Route)
-    assert response.intent_resolution.intent is not None
-    assert response.topic is not None

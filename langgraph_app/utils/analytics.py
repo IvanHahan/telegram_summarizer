@@ -1,6 +1,6 @@
 import os
 
-import aiohttp
+import requests
 
 GA_MEASUREMENT_ID = os.getenv("GA_MEASUREMENT_ID")
 GA_API_SECRET   = os.getenv("GA_API_SECRET")
@@ -9,7 +9,7 @@ GA_ENDPOINT     = (
     f"?measurement_id={GA_MEASUREMENT_ID}&api_secret={GA_API_SECRET}"
 )
 
-async def track_event(user_id: int | str, event_name: str) -> None:
+def track_event(user_id: int | str, event_name: str) -> None:
     """
     Send a simple event to Google Analytics 4 via Measurement Protocol.
     """
@@ -21,9 +21,8 @@ async def track_event(user_id: int | str, event_name: str) -> None:
         "events": [{"name": event_name}],
     }
 
-    async with aiohttp.ClientSession() as session:
-        try:
-            await session.post(GA_ENDPOINT, json=payload)
-        except Exception:
-            # silently ignore failures
-            pass
+    try:
+        requests.post(GA_ENDPOINT, json=payload)
+    except Exception:
+        # silently ignore failures
+        pass
