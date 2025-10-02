@@ -1,9 +1,27 @@
+import os
+from pathlib import Path
 from typing import Any, Dict
 
 from loguru import logger
 from pyrogram import Client, filters
 from pyrogram.types import KeyboardButton, ReplyKeyboardMarkup
 from transitions.extensions.asyncio import AsyncMachine
+
+user_clients = {}
+user_flows = {}
+
+
+async def get_user_client(user_id: int) -> Client:
+    if user_id not in user_clients:
+        session_file = Path(f"{user_id}")
+        client = Client(
+            str(session_file),
+            api_id=os.getenv("TELEGRAM_API_ID"),
+            api_hash=os.getenv("TELEGRAM_API_HASH"),
+        )
+        await client.connect()
+        user_clients[user_id] = client
+    return user_clients[user_id]
 
 
 class AuthorizationMachine(AsyncMachine):
@@ -25,9 +43,10 @@ class AuthorizationMachine(AsyncMachine):
 
     states = ["idle", "await_contact", "verify_contact", "await_code", "authorizing"]
 
-    def __init__(self, **kwargs):
+    def __init__(self, user_client, **kwargs):
         """Initialize the authorization state machine."""
         super().__init__(states=self.states, initial="idle", **kwargs)
+        self.user_client = user_client
 
         # Add transitions based on the state diagram
         self.add_transitions(
@@ -102,16 +121,11 @@ class AuthorizationMachine(AsyncMachine):
     # Condition methods
     async def is_authorized(self, client: Client, message) -> bool:
         """Check if user is authorized."""
-        me = await client.get_me()
-        return me is not None
+        return await self.user_client.storage.user_id() is not None
 
     async def is_contact_valid(self) -> bool:
         """Check if provided contact is valid."""
         return self._contact_valid
-
-    async def is_not_authorized(self) -> bool:
-        """Check if user is not authorized."""
-        return not await self.is_authorized()
 
     # After callback stubs
     async def after_handle_authorized(self, *args, **kwargs):
@@ -147,16 +161,17 @@ class AuthorizationMachine(AsyncMachine):
         logger.debug("After receiving contact")
         contact = message.contact
         if contact and contact.user_id == message.from_user.id:
-            self.user_client = Client(
-                str(message.from_user.id),
-                api_id=client.api_id,
-                api_hash=client.api_hash,
-                phone_number=contact.phone_number,
-            )
-            await self.user_client.start()
+            self._contact_valid = True
+            self.user_client.phone_number = contact.phone_number
             await self.user_client.send_code(phone_number=contact.phone_number)
             await self.ask_code(client=client, message=message)
+            client.add_handler(
+                client.on_message(filters.text & filters.user(contact.user_id))(
+                    self.receive_code
+                )
+            )
         else:
+            self._contact_valid = False
             await self.handle_invalid_contact(client=client, message=message)
 
     async def after_ask_code(self, client: Client, message):
@@ -172,7 +187,7 @@ class AuthorizationMachine(AsyncMachine):
     async def after_receive_code(self, client: Client, message):
         """Called after receiving verification code."""
         logger.debug("After receiving code")
-        await client.sign_in(code=message.text)
+        await self.user_client.sign_in(code=message.text)
         await message.reply("You have been successfully authorized!")
 
     async def after_finalize(self, *args, **kwargs):
